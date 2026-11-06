@@ -74,7 +74,7 @@ static void writeStatus(const fs::path& root,const fs::path& game,const fs::path
     try {
         std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::trunc);
         if(!f) return;
-        f<<"PBZModLoader 1.0.2 (JS only)\r\n";
+        f<<"PBZModLoader 1.0.3 (JS only)\r\n";
         f<<"status="<<status<<"\r\n";
         if(!game.empty()) {
             f<<"game="<<utf8(game.wstring())<<"\r\n";
@@ -132,16 +132,20 @@ static DWORD WINAPI monitor(void* context) noexcept {
                 // Compilation may take time; do not reserve another app's
                 // shortcut or queue repeated requests while preparing a batch.
                 UnregisterHotKey(nullptr,hotkeyId); hotkeyRegistered=false;
+                const unsigned published=revision++;
                 try {
-                    const unsigned published=revision++;
                     publishReload(reloadRoot,reloadScripts,published);
                     log("hot reload published revision="+std::to_string(published));
                     appendStatus(reloadRoot,"hot-reload revision="+std::to_string(published)+" published");
                 }
                 catch(const std::exception& e) {
                     log(std::string("hot reload preparation failed: ")+e.what());
-                    try { publishReloadFailure(reloadScripts,revision); appendStatus(reloadRoot,"hot-reload revision="+std::to_string(revision)+" failed: "+e.what()); ++revision; }
-                    catch(const std::exception& failure) { log(std::string("reload failure notification: ")+failure.what()); }
+                    try { publishReloadFailure(reloadScripts,published); appendStatus(reloadRoot,"hot-reload revision="+std::to_string(published)+" failed: "+e.what()); }
+                    catch(const std::exception& failure) {
+                        log(std::string("reload failure notification: ")+failure.what());
+                        hotReloadEnabled=false;
+                        log("hot reload disabled after failure notification could not be published");
+                    }
                 }
             }
             Sleep(50);

@@ -26,6 +26,14 @@ Install Node.js and npm on your development machine, then run `npm ci`, `npm run
 
 This repository contains loader source code, runtime file templates, the SDK, and development tools. Players should download an installation package from the release page above. Locally built player packages are placed in `releases/`; only runtime files belong in the game installation directory.
 
+## 1.0.3: hot-reload failure notification fix
+
+Fixed the revision being advanced twice when hot-reload preparation failed.
+The failure config now uses the same revision that watchers poll, so the UI and
+logs receive the notification and later reloads do not stall on an old
+revision. If the failure notification itself cannot be written, hot reload is
+disabled for the session and the failure is logged.
+
 ## 1.0.2: data layout
 
 Runtime data (`mods.ini`, `mods/`, `evidence/`, and status logs) lives under
