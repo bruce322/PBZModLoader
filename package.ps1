@@ -4,12 +4,9 @@ if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9-]+)?$') { throw 'Invalid re
 $files=@(
     'PBZModLoader-安装说明.txt',
     'ProjectPBZ/PBZModLoader/mods.ini',
-    'ProjectPBZ/PBZModLoader/TOOLCHAIN-LICENSE.txt',
     'ProjectPBZ/Content/JavaScript/PBZModLoader/bootstrap.js',
     'ProjectPBZ/Content/JavaScript/PBZModLoader/manager.js'
 )
-$files += @(Get-ChildItem "$PSScriptRoot/runtime/ProjectPBZ/PBZModLoader/compiler" -File | ForEach-Object { 'ProjectPBZ/PBZModLoader/compiler/'+$_.Name })
-if (!($files -contains 'ProjectPBZ/PBZModLoader/compiler/tsc.exe')) { throw 'Build bundled compiler first.' }
 $release=Join-Path $PSScriptRoot "releases/PBZModLoader-$Version-win64"
 $zip="$release.zip"
 if ((Test-Path -LiteralPath $release) -or (Test-Path -LiteralPath $zip)) { throw 'Release already exists; choose a new version or archive the existing release first.' }

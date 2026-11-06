@@ -1,6 +1,6 @@
 # PBZ TypeScript MOD 最小模板
 
-适用于支持 `mods/<ID>/main.js` 自动发现的 PBZModLoader（当前 0.3.4-preview）。
+适用于只自动发现和加载 `mods/<ID>/main.js` 的 PBZModLoader。
 复制整个模板文件夹即可独立开发，不需要加载器的 C++ 工程或游戏源码。
 
 ## 开始开发
@@ -48,7 +48,7 @@ ID 只使用英文字母、数字、下划线、连字符，并选择不与其�
 模板不会自动复制 JSON、图片等资源，也不会打包 npm 运行时依赖；需要这些能力时再扩展构建过程。
 不要把 `dist/` 这一层安装到 `mods/`，也不要把产物写进 `Content/JavaScript` 的加载器缓存。
 更新已有 MOD 时，退出游戏后用新构建的整个目录替换旧目录，避免遗留脚本。
-尤其不要保留旧 `main.ts`：加载器自动发现时会优先选择它，而不是新 `main.js`。
+发布时只保留构建后的 `main.js`；加载器不会读取或加载 `main.ts`。
 
 无需添加配置即可自动发现。若被禁用，在 `ProjectPBZ/PBZModLoader/mods.ini` 的已有 `[Mods]` 段中
 删除 `my-mod=0` 或改成 `my-mod=1`。禁用时设为 `0`，卸载时退出游戏后移除对应 MOD 文件夹。
@@ -83,8 +83,7 @@ ID 只使用英文字母、数字、下划线、连字符，并选择不与其�
   `type-index.json` 可按反射完整路径定位声明，`generation-report.json` 记录生成覆盖和未解析项，
   `api-surface.json` 记录实测证据；这些文件均位于 `vendor/game-api/`。
   新增调用前核实实际可调用性，不要直接修改生成声明；自己的补充放在 `types/custom.d.ts`。
-- 当前加载器也支持直接安装 TS，但启动时转换不执行完整类型检查且忽略 `tsconfig.json`。
-  运行中按 Alt+F5 会先重新编译，编译失败保留旧实例，修复后可再次重载。
+- 加载器只加载 JavaScript，不内置 TypeScript 编译器；本模板统一在本地完成类型检查并发布构建后的 `main.js`。
   本模板统一使用本地检查并发布 JS 的流程。
 
 ## UMG / UI 文本注意事项

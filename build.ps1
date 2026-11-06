@@ -3,11 +3,6 @@ $ErrorActionPreference='Stop'
 Push-Location $PSScriptRoot
 try {
     New-Item -ItemType Directory -Force build | Out-Null
-    $compilerSource=Join-Path $PSScriptRoot 'node_modules/@typescript/typescript-win32-x64'
-    $compilerTarget=Join-Path $PSScriptRoot 'runtime/ProjectPBZ/PBZModLoader/compiler'
-    New-Item -ItemType Directory -Force $compilerTarget | Out-Null
-    Copy-Item "$compilerSource/lib/*" $compilerTarget -Force
-    Copy-Item "$compilerSource/LICENSE","$compilerSource/NOTICE.txt" $compilerTarget -Force
     $proxies=@('version','hid','winmm','dsound','dxgi')
     node scripts/generate-proxies.cjs
     if ($LASTEXITCODE -ne 0) { throw 'Proxy generation failed' }

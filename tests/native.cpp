@@ -205,39 +205,39 @@ int main() {
     assert(config(temp).find("\"id\":\"a\",\"enabled\":false")!=std::string::npos);
     fs::remove(temp/L"mods/z/main.js");
     assert(config(temp).find("\"id\":\"z\"")==std::string::npos);
-    { std::ofstream f(temp/L"mods/a/main.ts"); f<<"import { value } from './helper'; export const answer: number = value;"; }
-    { std::ofstream f(temp/L"mods/a/helper.ts"); f<<"export const value: number = 42;"; }
-    fs::copy(fs::current_path()/L"runtime/ProjectPBZ/PBZModLoader/compiler",temp/L"compiler",fs::copy_options::recursive);
+    // TypeScript-only directories are ignored; explicit .ts entries are rejected.
+    { std::ofstream f(temp/L"mods/tsonly/main.ts"); f<<"export const value: number = 1;"; }
+    generated=config(temp);
+    assert(generated.find("tsonly")==std::string::npos);
+    { std::ofstream f(temp/L"mods.ini"); f<<prefix<<"Enabled=1\nEntry=mods/a/main.ts\n"; }
+    bool tsRejected=false;
+    try { config(temp); } catch(const std::exception& e) { tsRejected=std::string(e.what()).find("TypeScript")!=std::string::npos; }
+    assert(tsRejected);
+    std::cout<<"PASS config ignores TypeScript-only mods and rejects .ts entries\n";
     iniTest(automatic,true);
+    { std::ofstream f(temp/L"mods/a/main.js"); f<<"module.exports={};"; }
+    { std::ofstream f(temp/L"mods/a/helper.js"); f<<"module.exports=42;"; }
     syncMods(temp,temp/L"scripts");
-    generated=config(temp,temp/L"scripts");
-    assert(generated.find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
-    assert(fs::is_regular_file(temp/L"scripts/generated-mods/a/helper.js"));
-    { std::ofstream f(temp/L"mods/a/main.ts"); f<<"export const broken: = ;"; }
-    syncMods(temp,temp/L"scripts");
-    generated=config(temp,temp/L"scripts");
-    assert(generated.find("\"id\":\"a\",\"enabled\":false")!=std::string::npos);
     resetReloads(temp/L"scripts");
     assert(!fs::exists(temp/L"scripts/generated-reloads/1"));
-    { std::ofstream f(temp/L"mods/a/main.ts"); f<<"import { value } from './helper'; export const answer = value;"; }
     publishReload(temp,temp/L"scripts",1);
     assert(fs::exists(temp/L"scripts/generated-reloads/1/config.js"));
     auto first=sha256(temp/L"scripts/generated-reloads/1/generated-mods/a/helper.js");
-    { std::ofstream f(temp/L"mods/a/helper.ts"); f<<"export const value: number = 43;"; }
+    { std::ofstream f(temp/L"mods/a/helper.js"); f<<"module.exports=43;"; }
     publishReload(temp,temp/L"scripts",2);
     assert(fs::exists(temp/L"scripts/generated-reloads/2/config.js"));
     assert(first==sha256(temp/L"scripts/generated-reloads/1/generated-mods/a/helper.js"));
     assert(first!=sha256(temp/L"scripts/generated-reloads/2/generated-mods/a/helper.js"));
-    { std::ofstream f(temp/L"mods/a/main.ts"); f<<"export const broken: = ;"; }
+    fs::rename(temp/L"mods.ini",temp/L"mods.ini.bak");
     bool rejected=false; try { publishReload(temp,temp/L"scripts",3); } catch(const std::exception&) { rejected=true; }
     assert(rejected && !fs::exists(temp/L"scripts/generated-reloads/3"));
+    fs::rename(temp/L"mods.ini.bak",temp/L"mods.ini");
     publishReloadFailure(temp/L"scripts",3);
     { std::ifstream f(temp/L"scripts/generated-reloads/3/config.js"); std::ostringstream content; content<<f.rdbuf();
       assert(content.str().find("error:")!=std::string::npos); }
-    fs::remove(temp/L"mods/a/main.ts");
     publishReload(temp,temp/L"scripts",4);
     assert(fs::exists(temp/L"scripts/generated-reloads/4/config.js"));
-    std::cout<<"PASS hot reload immutable dependencies, compile failure and recovery\n";
+    std::cout<<"PASS hot reload immutable dependencies, preparation failure and recovery\n";
     fs::remove_all(temp/L"mods");
     iniTest(automatic,true);
     assert(config(temp).find("\"mods\":[]")!=std::string::npos);
@@ -255,6 +255,6 @@ int main() {
     std::cout<<"PASS platform-independent project discovery and missing runtime rejection\n";
     std::cout<<"PASS MOD cache: nested dependencies, stale cleanup, source and loader preservation\n";
     std::cout<<"PASS native redirect, argv, counter, relocated flags, filtering, bounds, concurrency, ring wrap\n";
-    std::cout<<"PASS native config: valid, missing, disabled, traversal, TS, invalid switch, duplicate ID (case-insensitive)\n";
+    std::cout<<"PASS native config: valid, missing, disabled, traversal, TypeScript rejection, invalid switch, duplicate ID (case-insensitive)\n";
     std::cout<<"PASS automatic discovery: sorting, dependencies ignored, switches, legacy merge, removal, empty directory\n";
 }

@@ -153,7 +153,7 @@ extern "C" void pbz_initialize() noexcept {
         resetReloads(scripts);
         reloadRoot=root; reloadScripts=scripts;
         syncMods(root,scripts);
-        auto generated=config(root,scripts);
+        auto generated=config(root);
         auto temporary=scripts/(L"generated-config."+std::to_wstring(GetCurrentProcessId())+L".tmp");
         { std::ofstream f(temporary,std::ios::binary); f<<generated; f.close(); check(bool(f),"write config"); }
         check(MoveFileExW(temporary.c_str(),(scripts/L"generated-config.js").c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH),"publish config");

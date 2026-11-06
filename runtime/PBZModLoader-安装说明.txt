@@ -15,7 +15,7 @@ WeGame 平台已实测可用，已确认 DLL 自动加载及 MOD 运行。
 
 更新前请备份自己的配置和 MOD；不要覆盖其他工具的同名 version.dll。
 使用备用入口更新时也不要把包内默认 version.dll 解压到 EXE 旁；只更新已选择的入口 DLL。
-更新加载器时需一并更新 DLL、bootstrap.js、manager.js 和随包编译器，保留自己的 mods.ini 配置。
+更新加载器时需一并更新 DLL、bootstrap.js、manager.js，保留自己的 mods.ini 配置。
 旧版若使用 ProjectPBZ\Mods\PBZModLoader，请将其中配置、mods 等内容整体迁移到
 ProjectPBZ\PBZModLoader，并同步更新 DLL；mods.ini 中原有相对 Entry 无需修改。
 
@@ -40,36 +40,34 @@ dsound.dll、dxgi.dll；本加载器只需选择其中一个入口安装，不�
 安装和管理 MOD
 
 - 将整个 MOD 文件夹放入 ProjectPBZ\PBZModLoader\mods，例如 mods\my-mod\main.js。
-  入口支持 main.ts 或 main.js；两者同时存在时优先使用 main.ts。
+  入口只支持 main.js；TypeScript MOD 需先在开发机构建为 main.js。
   文件夹名即 MOD ID，只使用英文字母、数字、下划线或连字符，不要多套一层 dist 目录。
 - 新 MOD 自动发现，无需添加配置。依赖脚本和资源应随 MOD 一起安装。
 - 在 ProjectPBZ\PBZModLoader\mods.ini 的已有 [Mods] 段添加 my-mod=0 可禁用；
   删除该行或改为 my-mod=1 可恢复。旧 Count / Mod.N 配置仍兼容，[Mods] 开关优先。
 - 更新 MOD 时建议退出游戏，用新版本的整个 MOD 目录替换旧目录，避免遗留脚本。
-  从 TS 版换成 JS 版时应移除旧 main.ts，否则仍会优先加载它。
-- TS 使用随包编译器转换，不做完整类型检查，也不读取 MOD 的 tsconfig.json。
-  启动时编译失败只跳过对应 MOD，详情见日志；开发者应在发布前完成类型检查。
+  从 TS 版换成 JS 版时，直接放入构建后的 main.js；旧的 main.ts 不会被加载。
+  加载器不内置 TypeScript 编译器，也不读取 tsconfig.json；类型检查与构建应在发布前完成。
 
 热重载（Alt+F5）
 
-修改 ProjectPBZ\PBZModLoader\mods 下的 JS/TS 或依赖文件，保存完成后切回游戏按 Alt+F5。
+修改 ProjectPBZ\PBZModLoader\mods 下的 JS 或依赖文件，保存完成后切回游戏按 Alt+F5。
 本地构建的 MOD 需先将新产物复制到上述安装目录。每次重载整组 MOD，包括未修改的 MOD。
 新增、删除 MOD 及 mods.ini 的 [Mods] 开关变化也会生效。
 仅游戏窗口在前台时响应；不监听文件变化，按住快捷键不连发。
-请求约每秒检查一次，TS 还需等待编译；完成后左上角显示约 4 秒成功、失败或跳过提示。
+请求约每秒检查一次；完成后左上角显示约 4 秒成功、失败或跳过提示。
 
 MOD 必须导出 stop() 清理定时器、事件订阅和资源；无持久资源也需导出空 stop()。
 加载器等待旧 stop 完成后才加载新入口，支持 Promise；切图和退出游戏不会自动调用 stop。
 缺少 stop 或清理失败会保留旧实例并跳过该 MOD，删除或禁用时也受此限制；此时请退出游戏后操作。
-stop 超过 5 秒未完成会保留旧实例并跳过该 MOD（日志 reload blocked），本次运行不再重试。TS 编译失败时保留旧实例，修复后可再次按 Alt+F5。
-入口执行失败（包括 TS 转换后的 JS）可能已产生部分副作用，本次游戏运行不再重试，需修复并重启。
-保存完成后再触发重载，编译期间避免继续改写文件。
+stop 超过 5 秒未完成会保留旧实例并跳过该 MOD（日志 reload blocked），本次运行不再重试。
+入口执行失败可能已产生部分副作用，本次游戏运行不再重试，需修复并重启。
+保存完成后再触发重载。
 
 日志和缓存
 
 日志：ProjectPBZ\PBZModLoader\evidence\<本次运行>\loader.log。
 可查找 failed、reload blocked、reload complete；快捷键无响应时也检查注册失败记录。
-TS 编译诊断另存于对应缓存 MOD 目录内的 compile.log。
 ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-mods、generated-reloads
 均为自动缓存，请勿编辑或在游戏运行中删除。启动时重建/清理，重载版本保留至下次启动。
 长期大量重载会增加磁盘和模块缓存占用，可退出并重新启动游戏。
