@@ -95,7 +95,7 @@ std::string config(const fs::path& root,const fs::path& scripts={},bool strict=f
     auto version=ini(p,L"Loader",L"Version");
     if(!version.empty() && version!=L"1") throw std::runtime_error("Unsupported config version");
     auto countValue=ini(p,L"Loader",L"Count");
-    int count=countValue.empty()?0:number(countValue,128); std::set<std::string> ids;
+    int count=countValue.empty()?0:number(countValue,128); std::vector<std::string> ids;
     struct Mod { std::string id,entry; bool enabled; };
     std::vector<Mod> mods;
     std::string result="'use strict';\nmodule.exports = {\"version\":1,\"mods\":[";
@@ -104,8 +104,11 @@ std::string config(const fs::path& root,const fs::path& scripts={},bool strict=f
         auto id=utf8(ini(p,section,L"Id")), entry=utf8(ini(p,section,L"Entry"));
         auto enabledValue=ini(p,section,L"Enabled");
         auto enabled=enabledValue.empty()?1:number(enabledValue,1);
-        if(!std::regex_match(id,std::regex("[A-Za-z0-9_-]+")) || !ids.insert(id).second ||
+        bool duplicate=false;
+        for(const auto& seen:ids) if(_stricmp(seen.c_str(),id.c_str())==0) { duplicate=true; break; }
+        if(!std::regex_match(id,std::regex("[A-Za-z0-9_-]+")) || duplicate ||
            !std::regex_match(entry,std::regex("mods/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(js|ts)"))) throw std::runtime_error("Invalid or duplicate MOD: "+id);
+        ids.push_back(id);
         auto overrideValue=ini(p,L"Mods",fs::u8path(id).wstring().c_str());
         if(!overrideValue.empty()) enabled=number(overrideValue,1);
         mods.push_back({id,entry,enabled!=0});

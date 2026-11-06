@@ -16,6 +16,7 @@ static fs::path reloadRoot,reloadScripts;
 static bool (*originalValidateBytes)(const GameString*,const GameBytes*)=nullptr;
 static bool (*originalValidateText)(const GameString*,const GameString*)=nullptr;
 static bool validateModBytes(const GameString* path,const GameBytes* source) noexcept {
+    if(!originalValidateBytes) return false;
     if(originalValidateBytes(path,source)) return true;
     try { if(trustedModBytes(reloadScripts,path,source)) return true; }
     catch(const std::exception& e) { log(std::string("MOD byte validation failed: ")+e.what()); }
@@ -23,6 +24,7 @@ static bool validateModBytes(const GameString* path,const GameBytes* source) noe
     return false;
 }
 static bool validateModText(const GameString* path,const GameString* source) noexcept {
+    if(!originalValidateText) return false;
     if(originalValidateText(path,source)) return true;
     try { if(trustedModText(reloadScripts,path,source)) return true; }
     catch(const std::exception& e) { log(std::string("MOD text validation failed: ")+e.what()); }
@@ -195,7 +197,7 @@ __attribute__((noinline)) static void armEntry(HMODULE module) noexcept {
     auto nt=(IMAGE_NT_HEADERS64*)(base+dos->e_lfanew);
     if(nt->Signature!=IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR64_MAGIC) return;
     DWORD rva=nt->OptionalHeader.AddressOfEntryPoint;
-    if(!rva || rva>nt->OptionalHeader.SizeOfImage-sizeof(entryBytes)) return;
+    if(!rva || nt->OptionalHeader.SizeOfImage<sizeof(entryBytes) || rva>nt->OptionalHeader.SizeOfImage-sizeof(entryBytes)) return;
     void* entry=base+rva; DWORD old,unused;
     if(!VirtualProtect(entry,sizeof(entryBytes),PAGE_EXECUTE_READWRITE,&old)) return;
     std::memcpy(entryBytes,entry,sizeof(entryBytes)); pbz_original_entry=entry;

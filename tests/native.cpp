@@ -113,6 +113,8 @@ int main() {
     assert(config(temp).find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
     iniTest("[Loader]\nVersion=2\nCount=1\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n",false);
     iniTest("[Loader]\nVersion=1\nCount=2\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n[Mod.1]\nId=a\nEnabled=0\nEntry=mods/a/main.js\n",false);
+    // Windows is case-insensitive for the same MOD directory; reject A/a to avoid silent collisions.
+    iniTest("[Loader]\nVersion=1\nCount=2\n[Mod.0]\nId=A\nEnabled=1\nEntry=mods/A/main.js\n[Mod.1]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n",false);
     const std::string automatic="[Loader]\nVersion=1\n";
     iniTest(automatic,true);
     assert(config(temp).find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
@@ -188,6 +190,6 @@ int main() {
     std::cout<<"PASS platform-independent project discovery and missing runtime rejection\n";
     std::cout<<"PASS MOD cache: nested dependencies, stale cleanup, source and loader preservation\n";
     std::cout<<"PASS native redirect, argv, counter, relocated flags, filtering, bounds, concurrency, ring wrap\n";
-    std::cout<<"PASS native config: valid, missing, disabled, traversal, TS, invalid switch, duplicate ID\n";
+    std::cout<<"PASS native config: valid, missing, disabled, traversal, TS, invalid switch, duplicate ID (case-insensitive)\n";
     std::cout<<"PASS automatic discovery: sorting, dependencies ignored, switches, legacy merge, removal, empty directory\n";
 }
