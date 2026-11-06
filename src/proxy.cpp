@@ -143,6 +143,7 @@ extern "C" void pbz_initialize() noexcept {
         wchar_t system[32768]; check(GetModuleFileNameW(realVersion,system,32768)>0,"system version path");
         log("proxy-system="+utf8(system));
         log("project="+utf8(project.wstring()));
+        if(utf8Bom(root/L"mods.ini")) log("WARNING mods.ini has a UTF-8 BOM; Windows INI ignores [Loader] and [Mods]; save as UTF-8 without BOM or ANSI");
         auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
         if(!enabled.empty() && number(enabled,1)==0) { log("MODs disabled by Loader.Enabled=0; original game continues"); SetLastError(savedError); return; }
         auto image=snapshotImage(GetCurrentProcess(),(U64)GetModuleHandleW(nullptr));

@@ -52,6 +52,19 @@ test('reload awaits cleanup before executing any new MOD and isolates cleanup fa
     assert.equal(result[1], old[1]);
 });
 
+test('reload times out a hung stop() and keeps the old MOD blocked', async () => {
+    const { reload } = require(path.join(base, 'manager.js'));
+    const old = [{ id: 'a', status: 'loaded', instance: { stop() { return new Promise(() => {}); } } }];
+    const calls = [];
+    const result = await reload(old, { version: 1, mods: [mod('a')] }, entry => {
+        calls.push(entry); return {};
+    }, () => {}, './generated-mods/', 20);
+    assert.deepEqual(calls, []);
+    assert.equal(result[0], old[0]);
+    assert.equal(old[0].reloadError, true);
+    assert.equal(old[0].status, 'failed');
+});
+
 test('missing stop and failed evaluation cannot duplicate registrations; disabled MODs can load', async () => {
     const { reload } = require(path.join(base, 'manager.js'));
     const old = [{ id: 'a', status: 'loaded', instance: {} }, { id: 'bad', status: 'failed' }, { id: 'off', status: 'disabled' }];

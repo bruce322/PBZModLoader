@@ -37,7 +37,21 @@ exports.load = function load(config, importMod, log, prefix = './generated-mods/
 
 // A failed import may already have registered callbacks. Do not retry it in this
 // session: there is no exported instance with which to clean up those effects.
-exports.reload = async function reload(previous, config, importMod, log, prefix) {
+function stopWithTimeout(instance, timeoutMs) {
+    const stopping = Promise.resolve().then(() => instance.stop());
+    // A MOD may finish cleanup after the timeout. Its result no longer matters,
+    // but an unhandled rejection would still surface in the game console.
+    stopping.catch(() => {});
+    let timer;
+    const expired = new Promise((_, reject) => {
+        timer = setTimeout(() => { const error = new Error('stop() timed out after ' + timeoutMs + 'ms; MOD kept blocked'); error.timeout = true; reject(error); }, timeoutMs);
+    });
+    return Promise.race([stopping, expired]).then(
+        value => { clearTimeout(timer); return value; },
+        error => { clearTimeout(timer); throw error; });
+}
+
+exports.reload = async function reload(previous, config, importMod, log, prefix, stopTimeoutMs = 5000) {
     validate(config);
     const blocked = new Map();
     for (const mod of previous) {
@@ -47,12 +61,13 @@ exports.reload = async function reload(previous, config, importMod, log, prefix)
             if (!mod.instance || typeof mod.instance.stop !== 'function') {
                 throw new Error('export stop() to enable hot reload');
             }
-            await mod.instance.stop();
+            await stopWithTimeout(mod.instance, stopTimeoutMs);
             delete mod.reloadError;
             mod.status = 'stopped';
             log('stopped ' + mod.id);
         } catch (error) {
             mod.reloadError = true;
+            if (error && error.timeout) mod.status = 'failed';
             blocked.set(mod.id, mod);
             log('reload blocked ' + mod.id + ': ' + String(error && error.stack || error));
         }

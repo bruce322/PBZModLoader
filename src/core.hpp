@@ -54,6 +54,10 @@ std::wstring ini(const fs::path& p,const std::wstring& section,const wchar_t* ke
     wchar_t buf[4096]; DWORD n=GetPrivateProfileStringW(section.c_str(),key,L"",buf,4096,p.c_str());
     if(n>=4095) throw std::runtime_error("Config value too long"); return std::wstring(buf,n);
 }
+bool utf8Bom(const fs::path& p) {
+    std::ifstream f(p,std::ios::binary); unsigned char b[3]{};
+    return bool(f.read(reinterpret_cast<char*>(b),sizeof(b))) && b[0]==0xEF && b[1]==0xBB && b[2]==0xBF;
+}
 int number(const std::wstring& s,int max) {
     if(s.empty() || s.find_first_not_of(L"0123456789")!=std::wstring::npos) throw std::runtime_error("Invalid numeric config");
     auto n=std::stoul(s); if(n>(unsigned)max) throw std::runtime_error("Config number out of range"); return (int)n;
@@ -227,10 +231,23 @@ void* allocate(HANDLE p,void* address,size_t n) { return VirtualAllocEx(p,addres
 BOOL release(HANDLE p,void* address) { return VirtualFreeEx(p,address,0,MEM_RELEASE); }
 #endif
 void patch(HANDLE p,U64 address,const Bytes& bytes) {
-    DWORD old=0,unused=0; check(protect(p,(void*)address,bytes.size(),PAGE_EXECUTE_READWRITE,&old),"patch protect");
-    try { write(p,address,bytes.data(),bytes.size()); }
-    catch(...) { protect(p,(void*)address,bytes.size(),old,&unused); throw; }
-    check(protect(p,(void*)address,bytes.size(),old,&unused),"restore protect");
+    SYSTEM_INFO si{}; GetSystemInfo(&si);
+    struct Saved { void* address; size_t size; DWORD protection; };
+    std::vector<Saved> saved; U64 cursor=address, end=address+bytes.size(); DWORD unused=0;
+    try {
+        while(cursor<end) {
+            U64 pageEnd=(cursor/si.dwPageSize+1)*si.dwPageSize;
+            size_t size=(size_t)((end<pageEnd?end:pageEnd)-cursor); DWORD old=0;
+            check(protect(p,(void*)cursor,size,PAGE_EXECUTE_READWRITE,&old),"patch protect");
+            saved.push_back({(void*)cursor,size,old}); cursor+=size;
+        }
+        write(p,address,bytes.data(),bytes.size());
+    }
+    catch(...) {
+        for(auto& s:saved) protect(p,s.address,s.size,s.protection,&unused);
+        throw;
+    }
+    for(auto& s:saved) check(protect(p,s.address,s.size,s.protection,&unused),"restore protect");
     check(FlushInstructionCache(p,(void*)address,bytes.size()),"flush instructions");
 }
 void imm64(Bytes& b,U64 n) { for(int i=0;i<8;++i) b.push_back((unsigned char)(n>>(i*8))); }

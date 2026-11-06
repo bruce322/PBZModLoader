@@ -12,6 +12,17 @@ void capture(void* context,const FString* name,void* argv) {
 }
 int main() {
     HANDLE process=GetCurrentProcess();
+    {
+        auto two=(unsigned char*)VirtualAlloc(nullptr,8192,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(two);
+        DWORD old; assert(VirtualProtect(two,4096,PAGE_EXECUTE_READ,&old));
+        Bytes cross={0x90,0x91,0x92,0x93,0x94}; patch(process,(U64)(two+4094),cross);
+        assert(two[4094]==0x90 && two[4095]==0x91 && two[4096]==0x92 && two[4097]==0x93 && two[4098]==0x94);
+        MEMORY_BASIC_INFORMATION first{},second{};
+        assert(VirtualQuery(two,&first,sizeof(first))==sizeof(first));
+        assert(VirtualQuery(two+4096,&second,sizeof(second))==sizeof(second));
+        assert(first.Protect==PAGE_EXECUTE_READ);
+        assert(second.Protect==PAGE_READWRITE);
+    }
     auto slab=(U64)VirtualAlloc(nullptr,SLAB_SIZE,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE); assert(slab);
     auto start=startStub(slab,(U64)&capture); write(process,slab,start.data(),start.size());
     const wchar_t text[]=L"PBZModLoader/bootstrap";
