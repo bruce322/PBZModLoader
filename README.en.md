@@ -26,6 +26,10 @@ Install Node.js and npm on your development machine, then run `npm ci`, `npm run
 
 This repository contains loader source code, runtime file templates, the SDK, and development tools. Players should download an installation package from the release page above. Locally built player packages are placed in `releases/`; only runtime files belong in the game installation directory.
 
+## 1.0.6: log retention, modes, and buffering
+
+`LogDirectoryLimitMiB` is a hard cap for the evidence directory. `LogRetentionRuns` (default 10, 1-100) is a soft target for ordinary run directories. Runs with extra files (failures/verification) are pinned, and `LogPinnedMax` (default 3, 0-10) bounds pinned runs. Cleanup runs at startup and segment rotation: oldest ordinary runs are removed first, then oldest pinned runs; the current run is never removed and runs actively written by another process are skipped. `LogMode=full|errors|off` controls writes (off still enforces the budget; errors writes only warnings/errors), and `LogSegmentMiB` defaults to 8. If space is still insufficient, writes stop and `degraded=1` appears in `loader-status.log` instead of retrying forever. Writes use an 8 KiB buffer; important lines are flushed immediately.
+
 ## 1.0.5: log rotation and disk budget
 
 Evidence logs are split into 8 MiB segments (`loader.log`, `loader.1.log`, ...), and the whole evidence directory is capped at 100 MiB by default. When over budget, the oldest run segments are removed first. Set `[Loader] LogDirectoryLimitMiB` to 16-512; out-of-range values are clamped and missing/invalid values use 100. Writes are serialized in-process, and a process-detach marker is appended on exit.
@@ -185,4 +189,4 @@ Each startup overwrites `ProjectPBZ/Content/JavaScript/PBZModLoader/loader-statu
 
 ### Log rotation and disk budget
 
-Each run's loader log is split into 8 MiB segments, and the evidence directory is capped at 100 MiB by default. When over budget, the oldest run segments are removed first; the segment being written is never removed. If space is still insufficient, writes pause and retry every 5 seconds. Adjust `[Loader] LogDirectoryLimitMiB` in `mods.ini`: 16-512 is valid, missing/invalid uses 100, and out-of-range values are clamped.
+Each run's loader log is split into `LogSegmentMiB` segments (default 8 MiB), and the evidence directory has a hard `LogDirectoryLimitMiB` cap (default 100 MiB, 16-512). `LogRetentionRuns` (default 10) is a soft target for ordinary runs; failed/verification runs with extra files are pinned and bounded by `LogPinnedMax` (default 3). Cleanup runs only at startup and segment rotation: oldest ordinary runs first, then oldest pinned; the current run is never removed and actively written runs are skipped. `LogMode=full|errors|off` controls writes; if space is still insufficient, writes stop and the status log records `degraded=1`. An 8 KiB buffer is used, with immediate flushes for important lines.

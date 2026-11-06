@@ -1,4 +1,4 @@
-PBZModLoader 1.0.5 安装说明
+PBZModLoader 1.0.6 安装说明
 
 1. 退出游戏，打开游戏安装目录（能看到 ProjectPBZ 文件夹的位置）。
 2. 先检查实际游戏 EXE 旁是否已有其他工具的 version.dll；如有，请按下方“备用入口”安装，勿覆盖。
@@ -73,7 +73,7 @@ LoggerHooks=1（默认）启用诊断钩子，0 关闭；SafeMode=1 本次运行
 
 日志和缓存
 
-日志：ProjectPBZ\Content\JavaScript\PBZModLoader\evidence\<本次运行>\loader.log（按 8 MiB 分段为 loader.1.log 等；整个 evidence 目录默认上限 100 MiB，超出时优先删最旧运行日志；可在 mods.ini 的 [Loader] 段用 LogDirectoryLimitMiB 调整，有效 16-512，缺省/非法按 100）。
+日志：ProjectPBZ\Content\JavaScript\PBZModLoader\evidence\<本次运行>\loader.log（按 LogSegmentMiB 分段，默认 8 MiB；整个 evidence 目录以 LogDirectoryLimitMiB 为硬上限，默认 100 MiB、有效 16-512；LogRetentionRuns 默认 10，LogPinnedMax 默认 3；失败/验证 run 会被 pin 但有上限；空间不足时停止写入并在状态日志写 degraded=1）。
 状态摘要：ProjectPBZ\Content\JavaScript\PBZModLoader\loader-status.log（每次启动覆盖，列出入口、MOD 列表、挂钩/诊断/安全模式状态与热重载开关）。
 可查找 failed、reload blocked、reload complete；快捷键无响应时也检查注册失败记录。
 ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-reloads（热重载版本副本）为自动缓存，请勿编辑或在游戏运行中删除。

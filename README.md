@@ -26,6 +26,10 @@ PBZModLoader 是《影之刃零》（Phantom Blade Zero）的 MOD 加载器，�
 
 本仓库包含加载器源码、运行文件模板、SDK 和开发工具。玩家请从上方发布页面获取安装包；本地构建的玩家运行包位于 `releases/`，游戏安装目录只需保留运行文件。
 
+## 1.0.6：日志保留、模式与缓冲
+
+evidence 目录始终以 `LogDirectoryLimitMiB` 为硬上限。`LogRetentionRuns`（默认 10，1-100）控制普通运行目录的软目标；失败/验证等带额外文件的运行目录会被标记为 pinned，`LogPinnedMax`（默认 3，0-10）限制 pinned 数量。清理在启动和段轮转时进行，优先删除最旧普通 run，再删最旧 pinned；当前 run 永不删除，正在被其他进程写入的 run 跳过。`LogMode=full|errors|off` 控制写入（off 仍执行清理，errors 只写警告/错误）；`LogSegmentMiB` 默认 8。空间仍不足时停止写入并把 `degraded=1` 写进 `loader-status.log`，不反复重试。写入使用 8 KiB 缓冲，重要行立即落盘。
+
 ## 1.0.5：日志轮转与磁盘配额
 
 evidence 下的加载器日志按 8 MiB 分段（loader.log、loader.1.log 等），整个 evidence 目录默认上限 100 MiB；超出时优先清理最旧的运行日志。`[Loader] LogDirectoryLimitMiB` 可设 16-512，越界值会被夹取，缺省/非法值按 100 处理。写入使用进程内锁；进程退出时在日志尾部写 process-detach 标记。
@@ -218,4 +222,4 @@ package.ps1 拒绝覆盖已有版本，并检查 ZIP 根目录、白名单及解
 
 ### 日志轮转与磁盘配额
 
-`evidence/` 下每个运行目录的加载器日志按 8 MiB 分段，整个 evidence 目录默认上限 100 MiB。超过上限时优先删除最旧运行目录中的 loader 段；正在写入的段不会被删。空间仍不足时暂停写入并每 5 秒重试。可在 `mods.ini` 的 `[Loader]` 段用 `LogDirectoryLimitMiB` 调整：有效 16-512，缺省/非法值按 100，越界值夹取。
+`evidence/` 下每个运行目录的加载器日志按 `LogSegmentMiB`（默认 8 MiB）分段，整个 evidence 目录以 `LogDirectoryLimitMiB`（默认 100 MiB，16-512）为硬上限。`LogRetentionRuns` 默认 10，控制普通 run 的软目标；带额外文件的失败/验证 run 会 pin，`LogPinnedMax` 默认 3。清理只在启动和段轮转时执行：先删最旧普通 run，再删最旧 pinned；当前 run 永不删，活动写者跳过。`LogMode=full|errors|off` 控制写入；空间仍不足时停止写入并在状态日志写 `degraded=1`。8 KiB 缓冲，重要行立即落盘。

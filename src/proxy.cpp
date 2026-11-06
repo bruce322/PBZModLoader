@@ -71,7 +71,7 @@ static void writeStatus(const fs::path& root,const fs::path& game,const fs::path
     try {
         std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::trunc);
         if(!f) return;
-        f<<"PBZModLoader 1.0.5 (JS only)\r\n";
+        f<<"PBZModLoader 1.0.6 (JS only)\r\n";
         f<<"status="<<status<<"\r\n";
         if(!game.empty()) {
             f<<"game="<<utf8(game.wstring())<<"\r\n";
@@ -87,6 +87,7 @@ static void writeStatus(const fs::path& root,const fs::path& game,const fs::path
         f<<"hot-reload="<<(hotReloadEnabled?"on":"off")<<"\r\n";
         f<<"logger-hooks="<<(loggerHooksActive?"on":"off")<<"\r\n";
         f<<"safe-mode="<<(safeModeActive?"on":"off")<<"\r\n";
+        f<<"logs="<<evidenceLog.status()<<"\r\n";
         if(previousRunUnclean) f<<"previous-run=unclean\r\n";
         if(!evidence.empty()) f<<"detail="<<utf8(evidence.wstring())<<"\r\n";
         if(!error.empty()) f<<"error="<<error<<"\r\n";
@@ -175,7 +176,12 @@ extern "C" void pbz_initialize() noexcept {
         SYSTEMTIME st; GetLocalTime(&st); wchar_t name[80];
         swprintf(name,80,L"%04u%02u%02u-%02u%02u%02u-%lu-dll",st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond,GetCurrentProcessId());
         evidence=root/L"evidence"/name; fs::create_directories(evidence);
-        evidenceLog.initialize(evidence,ini(root/L"mods.ini",L"Loader",L"LogDirectoryLimitMiB"));
+        auto logBudget=ini(root/L"mods.ini",L"Loader",L"LogDirectoryLimitMiB");
+        auto logRetention=ini(root/L"mods.ini",L"Loader",L"LogRetentionRuns");
+        auto logMode=ini(root/L"mods.ini",L"Loader",L"LogMode");
+        auto logPinned=ini(root/L"mods.ini",L"Loader",L"LogPinnedMax");
+        auto logSegment=ini(root/L"mods.ini",L"Loader",L"LogSegmentMiB");
+        evidenceLog.initialize(evidence,logBudget,logRetention,logMode,logPinned,logSegment);
         log("backend=dll; startup=exe-entry; debugger-api=none");
         log("entry-restored; pid="+std::to_string(GetCurrentProcessId()));
         HMODULE pinned=nullptr;
@@ -241,10 +247,12 @@ extern "C" void pbz_initialize() noexcept {
         if(worker) CloseHandle(worker); else log("ERROR monitor: CreateThread failed; MOD loading remains enabled");
     } catch(const std::exception& e) {
         const std::string message=e.what();
+        evidenceLog.pin("initialization failed");
         try { writeStatus(root,game,evidence,mods,"failed",message); } catch(...) {}
         log(std::string("MODs skipped: ")+message+"; original game continues");
     }
     catch(...) {
+        evidenceLog.pin("unknown initialization failure");
         try { writeStatus(root,game,evidence,mods,"failed","unknown initialization error"); } catch(...) {}
         log("MODs skipped: unknown initialization error; original game continues");
     }
