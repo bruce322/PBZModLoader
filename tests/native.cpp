@@ -48,7 +48,7 @@ int main() {
         const unsigned char start[]={0x48,0x8b,0x09,0x48,0x8b,0x01,0x48,0xff,0x20};
         std::memcpy(fake+0x1100,start,sizeof(start));
         ImageView view{fake,(U64)(UINT_PTR)fake,{{0x1000,0x500,IMAGE_SCN_MEM_READ|IMAGE_SCN_MEM_EXECUTE}}};
-        HookSites sites{}; sites.call=0x1000; sites.start=0x1100; sites.loggers={0x1200,0x1300,0x1400};
+        HookSites sites{}; sites.call=0x1000; sites.start=0x1100; sites.loggers={0x1200,0x1300,0x1400}; sites.loggerHooks=true;
         auto installed=install(process,(U64)(UINT_PTR)fake,view,sites);
         assert(fake[0x1000]==0xe8);
         assert(fake[0x1200]==0xe9 && fake[0x1300]==0xe9 && fake[0x1400]==0xe9);
@@ -56,6 +56,20 @@ int main() {
         VirtualFree((void*)installed.slab,0,MEM_RELEASE);
         VirtualFree(fake,0,MEM_RELEASE);
         std::cout<<"PASS mapped image view: install reads borrowed bytes\n";
+    }
+    {
+        auto fake=(unsigned char*)VirtualAlloc(nullptr,0x10000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(fake);
+        std::memset(fake,0x90,0x10000);
+        const unsigned char start[]={0x48,0x8b,0x09,0x48,0x8b,0x01,0x48,0xff,0x20};
+        std::memcpy(fake+0x1100,start,sizeof(start));
+        ImageView view{fake,(U64)(UINT_PTR)fake,{{0x1000,0x500,IMAGE_SCN_MEM_READ|IMAGE_SCN_MEM_EXECUTE}}};
+        HookSites sites{}; sites.call=0x1000; sites.start=0x1100; sites.loggers={0x1200,0x1300,0x1400}; sites.loggerHooks=false;
+        auto installed=install(process,(U64)(UINT_PTR)fake,view,sites);
+        assert(fake[0x1000]==0xe8);
+        assert(fake[0x1200]==0x90 && fake[0x1300]==0x90 && fake[0x1400]==0x90);
+        VirtualFree((void*)installed.slab,0,MEM_RELEASE);
+        VirtualFree(fake,0,MEM_RELEASE);
+        std::cout<<"PASS logger hooks optional: no logger signatures required or patched\n";
     }
     {
         auto two=(unsigned char*)VirtualAlloc(nullptr,8192,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(two);
@@ -77,8 +91,8 @@ int main() {
     // Original cmp followed by setae al; ret. The relocated cmp must preserve flags.
     Bytes fake=stolen; fake.insert(fake.end(),{0x0f,0x93,0xc0,0xc3}); write(process,original,fake.data(),fake.size());
     *(unsigned char*)operand=5;
-    auto logger=loggerStub(slab+256,slab+4096,original,stolen); write(process,slab+256,logger.data(),logger.size());
-    auto diagnostics=loggerStub(slab+768,slab+4096,original,stolen,true); write(process,slab+768,diagnostics.data(),diagnostics.size());
+    auto logger=loggerStub(slab+256,slab+4096,original,stolen,false,(U64)&pbzCaptureLog); write(process,slab+256,logger.data(),logger.size());
+    auto diagnostics=loggerStub(slab+768,slab+4096,original,stolen,true,(U64)&pbzCaptureLog); write(process,slab+768,diagnostics.data(),diagnostics.size());
     DWORD old; assert(VirtualProtect((void*)slab,4096,PAGE_EXECUTE_READ,&old)); FlushInstructionCache(process,(void*)slab,4096);
     expectedContext=(void*)0x1234; expectedArgv=(void*)0x5678;
     ((void(*)(void*,FString*,void*))slab)(expectedContext,nullptr,expectedArgv);
@@ -88,6 +102,10 @@ int main() {
     assert(emit(nullptr,&msg)==1); assert(*(U64*)(slab+4096)==1);
     assert(*(U64*)(slab+8192)==1); assert(std::wstring((wchar_t*)(slab+8192+16),std::size(message)-1)==message);
     const wchar_t other[]=L"unrelated"; FString skip={other,10,10}; emit(nullptr,&skip); emit(nullptr,nullptr); assert(*(U64*)(slab+4096)==1);
+    // Invalid pointers are rejected by the C++ guard, not dereferenced in the stub.
+    emit(nullptr,(FString*)(UINT_PTR)1);
+    FString badData{(wchar_t*)(UINT_PTR)1,20,20}; emit(nullptr,&badData);
+    assert(*(U64*)(slab+4096)==1);
     std::wstring longMessage=L"[PBZMOD]"+std::wstring(3000,L'x'); FString longMsg={longMessage.c_str(),(int)longMessage.size()+1,(int)longMessage.size()+1}; emit(nullptr,&longMsg);
     assert(*(unsigned*)(slab+8192+2048+8)==1000);
     std::vector<std::thread> workers; for(int i=0;i<8;++i) workers.emplace_back([&]{for(int j=0;j<16;++j) assert(emit(nullptr,&msg)==1);});
@@ -105,6 +123,7 @@ int main() {
     assert(*(unsigned*)(slab+8192+(431%256)*2048+8)==1);
     VirtualFree((void*)slab,0,MEM_RELEASE);
     auto temp=fs::temp_directory_path()/(L"pbz-loader-test-"+std::to_wstring(GetCurrentProcessId()));
+    std::error_code tempError; fs::remove_all(temp,tempError);
     assert(fs::create_directory(temp)); fs::create_directories(temp/L"mods/a");
     {
         auto root=temp/L"validation";

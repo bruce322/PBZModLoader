@@ -14,6 +14,9 @@ static HMODULE realVersion=nullptr;
 static std::atomic<FARPROC> versionFunctions[proxyCount]{};
 static fs::path reloadRoot,reloadScripts;
 static bool hotReloadEnabled=false;
+static bool loggerHooksActive=false;
+static bool safeModeActive=false;
+static bool previousRunUnclean=false;
 static bool (*originalValidateBytes)(const GameString*,const GameBytes*)=nullptr;
 static bool (*originalValidateText)(const GameString*,const GameString*)=nullptr;
 static bool validateModBytes(const GameString* path,const GameBytes* source) noexcept {
@@ -85,6 +88,9 @@ static void writeStatus(const fs::path& root,const fs::path& game,const fs::path
         for(const auto& mod:mods) f<<"mod "<<mod.id<<" "<<(mod.enabled?"enabled":"disabled")<<" "<<mod.entry<<"\r\n";
         f<<"hooks="<<(status==std::string("installed")?"installed":"not-installed")<<"\r\n";
         f<<"hot-reload="<<(hotReloadEnabled?"on":"off")<<"\r\n";
+        f<<"logger-hooks="<<(loggerHooksActive?"on":"off")<<"\r\n";
+        f<<"safe-mode="<<(safeModeActive?"on":"off")<<"\r\n";
+        if(previousRunUnclean) f<<"previous-run=unclean\r\n";
         if(!evidence.empty()) f<<"detail="<<utf8(evidence.wstring())<<"\r\n";
         if(!error.empty()) f<<"error="<<error<<"\r\n";
     } catch(...) {}
@@ -181,16 +187,34 @@ extern "C" void pbz_initialize() noexcept {
         log("project="+utf8(project.wstring()));
         auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
         auto hotReload=ini(root/L"mods.ini",L"Loader",L"HotReload");
-        try { hotReloadEnabled=!hotReload.empty() && number(hotReload,1)==1; }
+        auto loggerHooks=ini(root/L"mods.ini",L"Loader",L"LoggerHooks");
+        auto safeMode=ini(root/L"mods.ini",L"Loader",L"SafeMode");
+        try { hotReloadEnabled=!hotReload.empty() && number(hotReload,0)==1; }
         catch(...) { hotReloadEnabled=false; log("HotReload value invalid; disabled"); }
+        try { loggerHooksActive=loggerHooks.empty() || number(loggerHooks,1)==1; }
+        catch(...) { loggerHooksActive=false; log("LoggerHooks value invalid; disabled"); }
+        try { safeModeActive=!safeMode.empty() && number(safeMode,1)==1; }
+        catch(...) { safeModeActive=false; log("SafeMode value invalid; disabled"); }
+        if(safeModeActive) {
+            loggerHooksActive=false; hotReloadEnabled=false;
+            log("SafeMode enabled: logger hooks and hot reload disabled");
+        }
+        const auto marker=root/L"loader-initializing.marker";
+        previousRunUnclean=fs::exists(marker);
+        { std::ofstream f(marker,std::ios::binary|std::ios::trunc); f<<"initializing"; }
+        if(previousRunUnclean) log("previous run did not clear the initializing marker; try SafeMode=1 if it crashed");
         if(!enabled.empty() && number(enabled,1)==0) {
+            std::error_code markerError; fs::remove(marker,markerError);
             writeStatus(root,game,evidence,mods,"disabled","Loader.Enabled=0");
             log("MODs disabled by Loader.Enabled=0; original game continues"); SetLastError(savedError); return;
         }
         auto image=snapshotImage(GetCurrentProcess(),(U64)GetModuleHandleW(nullptr));
-        const auto sites=resolveSites(image);
+        auto sites=resolveSites(image);
+        const bool loggerSignatures=sites.loggerHooks;
+        if(!loggerHooksActive) sites.loggerHooks=false;
+        loggerHooksActive=sites.loggerHooks;
         { std::ostringstream message; message<<"signatures validated; call-rva=0x"<<std::hex<<sites.call<<" start-rva=0x"<<sites.start;
-          for(auto rva:sites.loggers) message<<" logger-rva=0x"<<rva; log(message.str()); }
+          if(sites.loggerHooks) for(auto rva:sites.loggers) message<<" logger-rva=0x"<<rva; else message<<" loggers=off"; log(message.str()); }
         for(auto file:{L"bootstrap.js",L"manager.js"}) if(!fs::is_regular_file(scripts/file)) throw std::runtime_error("Missing loader JS");
         resetReloads(scripts);
         reloadRoot=root; reloadScripts=scripts;
@@ -207,6 +231,9 @@ extern "C" void pbz_initialize() noexcept {
         }
         auto installed=install(GetCurrentProcess(),base,image,sites,(U64)&validateModBytes,(U64)&validateModText);
         writeStatus(root,game,evidence,mods,"installed");
+        { std::error_code markerError; fs::remove(root/L"loader-initializing.marker",markerError); }
+        if(!loggerSignatures) log("diagnostics=off (PuerTS logger signatures not found)");
+        else if(!loggerHooksActive) log("diagnostics=off (LoggerHooks=0 or SafeMode=1)");
         if(sites.validateBytes) log("script validation adapters installed; scope=PBZModLoader; content=local-file-exact");
         log("native hooks installed; configuration published");
         log(std::string("hot reload ")+(hotReloadEnabled?"enabled":"disabled")+" (Alt+F5)");

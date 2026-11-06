@@ -49,9 +49,10 @@ struct ImageView {
     }
 };
 struct HookSites {
-    size_t call,start; std::array<size_t,3> loggers;
+    size_t call,start; std::array<size_t,3> loggers{};
     size_t validateBytes=0,validateText=0;
     std::array<size_t,5> validationCalls{};
+    bool loggerHooks=false;
 };
 void resolveValidationSites(const ImageView& image,HookSites& sites,bool required) {
     const std::vector<int> bytes={0x40,0x53,0x48,0x83,0xec,0x20,0x48,0x8b,0xda,0xe8,-1,-1,-1,-1,0x48,0x85,0xc0,0x74,0x22,0x48,0x63,0x53,0x08,0x48,0x3b,0x50,0x08,0x75,0x18,0x48,0x8b,0x0b,0x4c,0x8d,0x40,0x18,0xe8,-1,-1,-1,-1,0x84,0xc0,0x74,0x08,0xb0,0x01,0x48,0x83,0xc4,0x20,0x5b,0xc3,0x32,0xc0,0x48,0x83,0xc4,0x20,0x5b,0xc3};
@@ -106,6 +107,7 @@ HookSites resolveSites(const ImageView& image) {
     }
     if(count!=1) throw std::runtime_error("MainStart signature requires one validated match; found="+std::to_string(count));
     size_t category=0,source=0;
+    bool loggerHooks=true;
     for(size_t i=0;i<3;++i) {
         const int level[]={5,3,2};
         const std::vector<int> logger={0x80,0x3d,-1,-1,-1,-1,level[i],0x72,0x28,0x83,0x7a,0x08,0,0x74,5,0x4c,0x8b,0x0a,0xeb,7,0x4c,0x8d,0x0d,-1,-1,-1,-1,0x4c,0x8b,0xc1,0x48,0x8d,0x15,-1,-1,-1,-1,0x48,0x8d,0x0d,-1,-1,-1,-1,0xe9,-1,-1,-1,-1,0xc3};
@@ -127,10 +129,11 @@ HookSites resolveSites(const ImageView& image) {
                 sites.loggers[i]=at; matchedCategory=cat; matchedSource=src; ++count;
             } catch(const std::exception&) {}
         }
-        if(count!=1) throw std::runtime_error("PuerTS logger signature requires one validated match; level="+std::to_string(level[i])+" found="+std::to_string(count));
-        if(i && (category!=matchedCategory || source!=matchedSource)) throw std::runtime_error("PuerTS logger references disagree");
+        if(count!=1) { loggerHooks=false; break; }
+        if(i && (category!=matchedCategory || source!=matchedSource)) { loggerHooks=false; break; }
         category=matchedCategory; source=matchedSource;
     }
+    if(loggerHooks) sites.loggerHooks=true; else sites.loggers.fill(0);
     resolveValidationSites(image,sites,rspLayout);
     return sites;
 }

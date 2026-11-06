@@ -9,6 +9,7 @@
 #include <iostream>
 #include <vector>
 #include <array>
+#include <atomic>
 #include <set>
 #include <map>
 #include <regex>
@@ -250,7 +251,7 @@ void absoluteJump(Bytes& b,U64 target) { b.insert(b.end(),{0xff,0x25,0,0,0,0}); 
 #include "signatures.hpp"
 bool mappedReadable(U64 at,size_t size) {
     constexpr DWORD readable=PAGE_READONLY|PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY;
-    U64 end=at+size;
+    U64 end=at+size; if(end<at) return false;
     while(at<end) {
         MEMORY_BASIC_INFORMATION info{};
         if(!VirtualQuery((LPCVOID)(UINT_PTR)at,&info,sizeof(info))) return false;
@@ -260,6 +261,29 @@ bool mappedReadable(U64 at,size_t size) {
         at=next;
     }
     return true;
+}
+// Called from the machine-code logger hook, never from DllMain. VirtualQuery
+// guards the FString object and payload so a changed PuerTS ABI skips one log
+// record instead of dereferencing a stale pointer on the game thread.
+struct LoggerString { const wchar_t* data; int count; int capacity; };
+extern "C" inline void pbzCaptureLog(const void* object,U64 ring,int captureAll) noexcept {
+    if(!object || !ring) return;
+    if(!mappedReadable((U64)object,sizeof(LoggerString))) return;
+    const auto text=static_cast<const LoggerString*>(object);
+    if(!text->data || text->count<(captureAll?1:5)) return;
+    int length=text->count-1;
+    if(length>1000) length=1000;
+    if(length<0) return;
+    const size_t bytes=(size_t)length*sizeof(wchar_t);
+    if(bytes && !mappedReadable((U64)text->data,bytes)) return;
+    if(!captureAll && (length<4 || text->data[0]!=L'[' || text->data[1]!=L'P' || text->data[2]!=L'B' || text->data[3]!=L'Z')) return;
+    auto counter=reinterpret_cast<std::atomic<U64>*>(ring);
+    const U64 old=counter->fetch_add(1,std::memory_order_relaxed);
+    auto record=reinterpret_cast<unsigned char*>(ring+4096+(old&255)*2048);
+    *reinterpret_cast<U64*>(record)=0;
+    *reinterpret_cast<unsigned int*>(record+8)=(unsigned)length;
+    if(length) std::memcpy(record+16,text->data,bytes);
+    reinterpret_cast<std::atomic<U64>*>(record)->store(old+1,std::memory_order_release);
 }
 // Return a non-owning view of an image already mapped into this process. The
 // previous implementation allocated and copied SizeOfImage bytes at startup;
@@ -306,28 +330,23 @@ Bytes startStub(U64 slab,U64 target) {
     b.push_back(0x9d); b.insert(b.end(),{0x48,0xba}); imm64(b,slab+4128); // popfq; mov rdx,FString*
     absoluteJump(b,target); return b;
 }
-Bytes loggerStub(U64 at,U64 ring,U64 original,const Bytes& stolen,bool captureAll=false) {
-    // Preserve flags and every register touched. No calls, so no unwind/stack-alignment change.
-    Bytes b={0x9c,0x50,0x51,0x52,0x56,0x57,0x41,0x51,0x41,0x52,0x41,0x53};
-    std::vector<size_t> exits;
-    auto jcc=[&](unsigned char op){ b.insert(b.end(),{0x0f,op}); exits.push_back(b.size()); imm32(b,0); };
-    auto add=[&](std::initializer_list<unsigned char> v){b.insert(b.end(),v);};
-    add({0x48,0x85,0xd2}); jcc(0x84); // test rdx
-    add({0x8b,0x4a,0x08,0x83,0xf9,(unsigned char)(captureAll?1:5)}); jcc(0x8c);
-    add({0x48,0x8b,0x32,0x48,0x85,0xf6}); jcc(0x84); // rsi=data
-    if(!captureAll) {
-        add({0x48,0xb8}); imm64(b,0x005a00420050005bULL); // UTF-16 "[PBZ"
-        add({0x48,0x39,0x06}); jcc(0x85);
-    }
-    add({0xff,0xc9,0xb8,0xe8,0x03,0,0,0x39,0xc1,0x0f,0x47,0xc8}); // min(count-1,1000)
-    add({0x49,0xbb}); imm64(b,ring);
-    add({0xb8,1,0,0,0,0xf0,0x49,0x0f,0xc1,0x03}); // lock xadd [r11],rax
-    add({0x4c,0x8d,0x50,0x01,0x25,0xff,0,0,0,0x48,0xc1,0xe0,0x0b}); // seq=old+1; slot=(old&255)*2048
-    add({0x49,0x8d,0xbc,0x03}); imm32(b,4096); // rdi=ring+4096+slot (slab+8192)
-    add({0x49,0x89,0xf9,0x48,0xc7,0x07,0,0,0,0,0x89,0x4f,0x08,0x48,0x83,0xc7,0x10,0xfc,0xf3,0x66,0xa5});
-    add({0x4d,0x87,0x11}); // xchg [r9],r10 publishes complete record
-    size_t end=b.size(); for(auto i:exits) { int d=(int)(end-i-4); std::memcpy(b.data()+i,&d,4); }
-    add({0x41,0x5b,0x41,0x5a,0x41,0x59,0x5f,0x5e,0x5a,0x59,0x58,0x9d});
+Bytes loggerStub(U64 at,U64 ring,U64 original,const Bytes& stolen,bool captureAll,U64 capture) {
+    // Preserve flags and every register touched. The helper validates the FString
+    // before reading it; the stub only replays the stolen comparison and jumps.
+    Bytes b={0x9c,0x41,0x50,0x50,0x51,0x52,0x56,0x57,0x41,0x51,0x41,0x52,0x41,0x53};
+    // The helper may use XMM0-5 for its memcpy; save them because the stolen
+    // instruction lives in arbitrary code that may keep live values there.
+    b.insert(b.end(),{0x48,0x81,0xec,0x88,0,0,0}); // sub rsp,0x88
+    const unsigned char xmmStore[]={0x44,0x4c,0x54,0x5c,0x64,0x6c};
+    for(int i=0;i<6;++i) b.insert(b.end(),{0xf3,0x0f,0x7f,xmmStore[i],0x24,(unsigned char)(0x28+i*16)});
+    b.insert(b.end(),{0x48,0x89,0xd1}); // mov rcx,rdx (FString*)
+    b.insert(b.end(),{0x48,0xba}); imm64(b,ring); // mov rdx,ring
+    b.insert(b.end(),{0x41,0xb8}); imm32(b,captureAll?1:0); // mov r8d,captureAll
+    b.insert(b.end(),{0x48,0xb8}); imm64(b,capture); // mov rax,helper
+    b.insert(b.end(),{0xff,0xd0}); // call rax; caller-owned shadow at rsp+0
+    for(int i=0;i<6;++i) b.insert(b.end(),{0xf3,0x0f,0x6f,xmmStore[i],0x24,(unsigned char)(0x28+i*16)});
+    b.insert(b.end(),{0x48,0x81,0xc4,0x88,0,0,0}); // add rsp,0x88
+    b.insert(b.end(),{0x41,0x5b,0x41,0x5a,0x41,0x59,0x5f,0x5e,0x5a,0x59,0x58,0x41,0x58,0x9d});
     // Relocate the exact seven-byte cmp byte [rip+disp32],imm8; following jcc stays original.
     int oldDisp; std::memcpy(&oldDisp,stolen.data()+2,4);
     U64 operand=original+7+oldDisp;
@@ -341,14 +360,14 @@ Installed install(HANDLE p,U64 base,const ImageView& image,const HookSites& site
     const auto& loggers=sites.loggers;
     std::array<Bytes,3> signatures;
     const unsigned char* imageBytes=image.raw();
-    for(int i=0;i<3;++i) signatures[i]=Bytes(imageBytes+loggers[i],imageBytes+loggers[i]+7);
+    if(sites.loggerHooks) for(int i=0;i<3;++i) signatures[i]=Bytes(imageBytes+loggers[i],imageBytes+loggers[i]+7);
     const Bytes originalCall(imageBytes+sites.call,imageBytes+sites.call+5);
     auto verify=[&](U64 addr,const Bytes& expected) { Bytes got(expected.size()); read(p,addr,got.data(),got.size()); if(got!=expected) throw std::runtime_error("Instruction signature mismatch"); };
     verify(base+sites.call,originalCall);
     verify(base+sites.start,{0x48,0x8b,0x09,0x48,0x8b,0x01,0x48,0xff,0x20});
     if(sites.validateBytes && (!validateBytesHook || !validateTextHook)) throw std::runtime_error("Missing script validation adapters");
     for(auto at:sites.validationCalls) if(at) verify(base+at,Bytes(imageBytes+at,imageBytes+at+5));
-    for(int i=0;i<3;++i) verify(base+loggers[i],signatures[i]);
+    if(sites.loggerHooks) for(int i=0;i<3;++i) verify(base+loggers[i],signatures[i]);
     state.slab=allocateNear(p,base+sites.call);
     try {
         Bytes blob(3072); auto stub=startStub(state.slab,base+sites.start); std::copy(stub.begin(),stub.end(),blob.begin());
@@ -356,9 +375,9 @@ Installed install(HANDLE p,U64 base,const ImageView& image,const HookSites& site
             Bytes gate; absoluteJump(gate,validateBytesHook); std::copy(gate.begin(),gate.end(),blob.begin()+2048);
             gate.clear(); absoluteJump(gate,validateTextHook); std::copy(gate.begin(),gate.end(),blob.begin()+2080);
         }
-        for(int i=0;i<3;++i) {
+        if(sites.loggerHooks) for(int i=0;i<3;++i) {
             // PuerTS startup errors occur before bootstrap can add our prefix.
-            auto logger=loggerStub(state.slab+256+i*512,state.slab+4096,base+loggers[i],signatures[i],i!=0);
+            auto logger=loggerStub(state.slab+256+i*512,state.slab+4096,base+loggers[i],signatures[i],i!=0,(U64)&pbzCaptureLog);
             if(logger.size()>512) throw std::runtime_error("Logger stub overflow");
             std::copy(logger.begin(),logger.end(),blob.begin()+256+i*512);
         }
@@ -372,7 +391,7 @@ Installed install(HANDLE p,U64 base,const ImageView& image,const HookSites& site
         // Prove every rel32 branch fits before changing any game instruction.
         Bytes call={0xe8}; rel32(call,base+sites.call+5,state.slab);
         std::array<Bytes,3> hooks;
-        for(int i=0;i<3;++i) { hooks[i]={0xe9}; rel32(hooks[i],base+loggers[i]+5,state.slab+256+i*512); hooks[i].insert(hooks[i].end(),{0x90,0x90}); }
+        if(sites.loggerHooks) for(int i=0;i<3;++i) { hooks[i]={0xe9}; rel32(hooks[i],base+loggers[i]+5,state.slab+256+i*512); hooks[i].insert(hooks[i].end(),{0x90,0x90}); }
         std::array<Bytes,5> validators;
         for(size_t i=0;i<validators.size();++i) if(sites.validationCalls[i]) {
             validators[i]={0xe8}; rel32(validators[i],base+sites.validationCalls[i]+5,state.slab+(i==4?2080:2048));
@@ -382,7 +401,7 @@ Installed install(HANDLE p,U64 base,const ImageView& image,const HookSites& site
             state.patches.push_back({base+at,Bytes(imageBytes+at,imageBytes+at+5)});
             patch(p,base+at,validators[i]);
         }
-        for(int i=0;i<3;++i) {
+        if(sites.loggerHooks) for(int i=0;i<3;++i) {
             state.patches.push_back({base+loggers[i],signatures[i]});
             patch(p,base+loggers[i],hooks[i]);
         }

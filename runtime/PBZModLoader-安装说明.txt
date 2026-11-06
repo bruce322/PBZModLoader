@@ -67,10 +67,16 @@ stop 超过 5 秒未完成会保留旧实例并跳过该 MOD（日志 reload blo
 入口执行失败可能已产生部分副作用，本次游戏运行不再重试，需修复并重启。
 保存完成后再触发重载。
 
+诊断与安全模式
+
+3 个 PuerTS 日志钩子只用于把诊断日志写进 loader.log，不是加载 MOD 必需；签名缺失时自动关闭，MOD 仍加载。
+LoggerHooks=1（默认）启用诊断钩子，0 关闭；SafeMode=1 本次运行关闭诊断钩子和热重载，用于排查启动崩溃。
+若 ProjectPBZ\PBZModLoader\loader-initializing.marker 残留，状态日志会写 previous-run=unclean；成功初始化后会删除。
+
 日志和缓存
 
 日志：ProjectPBZ\PBZModLoader\evidence\<本次运行>\loader.log。
-状态摘要：ProjectPBZ\PBZModLoader\loader-status.log（每次启动覆盖，列出入口、MOD 列表、挂钩和热重载开关）。
+状态摘要：ProjectPBZ\PBZModLoader\loader-status.log（每次启动覆盖，列出入口、MOD 列表、挂钩/诊断/安全模式状态与热重载开关）。
 可查找 failed、reload blocked、reload complete；快捷键无响应时也检查注册失败记录。
 ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-mods（指向 mods 的硬链接视图，硬链接失败时复制）
 与 generated-reloads（热重载版本副本）均为自动缓存，请勿编辑或在游戏运行中删除。

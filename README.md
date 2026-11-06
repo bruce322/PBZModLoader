@@ -187,6 +187,15 @@ TypeScript MOD 应使用 `templates/ts-mod` 在开发机执行 `npm ci`、`npm r
 
 临时产物在 `Content/JavaScript/PBZModLoader/generated-reloads/`，版本目录保留至下一次启动清理，以支持旧实例和延迟 require；长时间大量重载会增加磁盘和模块缓存占用。仅 MOD 目录内的相对依赖随版本隔离，勿用加载器缓存绝对路径跨版本引用。日志查找 `hot reload published`、`stopped`、`reload complete` 和 `reload blocked`。
 
+### 诊断钩子与安全模式
+
+加载器的 3 个 PuerTS 日志钩子只用于把 `[PBZ` 日志写进 `loader.log`，不是加载 MOD 所必需。找不到匹配签名时会自动关闭，MOD 仍正常加载。可在 `mods.ini` 的 `[Loader]` 段显式控制：
+
+- `LoggerHooks=1`（默认）：签名完整时安装诊断钩子；`0` 关闭。
+- `SafeMode=1`：本次运行关闭诊断钩子和 Alt+F5 热重载，用于排查崩溃；默认 `0`。
+
+排查启动崩溃时可先设 `SafeMode=1`。若 `ProjectPBZ/PBZModLoader/loader-initializing.marker` 残留，状态日志会写 `previous-run=unclean`；加载器成功初始化后会删除该标记。状态日志同时列出 `logger-hooks` 与 `safe-mode` 状态。
+
 ### 玩家可读状态
 
-每次启动会在 `ProjectPBZ/PBZModLoader/loader-status.log` 覆盖写入一份简表：加载器版本、游戏路径与大小、入口 DLL、MOD 总数/启用/禁用及列表、挂钩状态、热重载开关和 evidence 日志路径；重载结果会追加到同一文件。该文件是只读摘要，详细原因仍看 `evidence/<本次运行>/loader.log`。
+每次启动会在 `ProjectPBZ/PBZModLoader/loader-status.log` 覆盖写入一份简表：加载器版本、游戏路径与大小、入口 DLL、MOD 总数/启用/禁用及列表、挂钩/诊断/安全模式状态、热重载开关和 evidence 日志路径；重载结果会追加到同一文件。该文件是只读摘要，详细原因仍看 `evidence/<本次运行>/loader.log`。

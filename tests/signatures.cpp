@@ -27,6 +27,7 @@ int main(int argc,char** argv) {
     const bool november=original.call==0x66c3e1b;
     assert(original.call==(november?0x66c3e1b:0x6686768) && original.start==(november?0x62cc850:0x6284a20));
     assert((original.loggers==(november?std::array<size_t,3>{0x62eee00,0x62f6830,0x62e9c40}:std::array<size_t,3>{0x62ab700,0x62b2e00,0x62a56b0})));
+    assert(original.loggerHooks);
     const size_t callOffset=november?29:27;
     if(november) {
         assert(original.validateBytes==0x62f65a0 && original.validateText==0x62f65e0);
@@ -104,20 +105,35 @@ int main(int argc,char** argv) {
     reject(); image.sections=sections;
     auto loggerSection=*std::find_if(sections.begin(),sections.end(),[&](ImageSection s){return moved.loggers[0]>=s.begin && moved.loggers[0]<s.begin+s.size;});
     // Duplicate just the first logger's 50-byte executable window.
-    image.sections.push_back({moved.loggers[0],50,loggerSection.flags}); reject(); image.sections=sections;
+    image.sections.push_back({moved.loggers[0],50,loggerSection.flags});
+    {
+        auto disabled=resolveSites(image);
+        assert(!disabled.loggerHooks);
+        assert((disabled.loggers==std::array<size_t,3>{}));
+        assert(disabled.call==moved.call && disabled.start==moved.start);
+    }
+    image.sections=sections;
     auto category=image.relative(moved.loggers[1],2,7);
     for(auto offset:{size_t(0),size_t(30)}) {
         int32_t delta=(int32_t)((int64_t)category+1-(int64_t)(moved.loggers[1]+offset+7));
         std::memcpy(image.bytes.data()+moved.loggers[1]+offset+(offset?3:2),&delta,4);
     }
-    reject();
+    {
+        auto disabled=resolveSites(image);
+        assert(!disabled.loggerHooks);
+        assert((disabled.loggers==std::array<size_t,3>{}));
+    }
     for(auto offset:{size_t(0),size_t(30)}) {
         int32_t delta=(int32_t)((int64_t)category-(int64_t)(moved.loggers[1]+offset+7));
         std::memcpy(image.bytes.data()+moved.loggers[1]+offset+(offset?3:2),&delta,4);
     }
     auto desc=image.relative(moved.loggers[0]+37,3,7), source=image.value<U64>(desc+8)-image.origin;
     saved=image.bytes[source]; image.bytes[source]=0; reject(); image.bytes[source]=saved;
-    // A code-like match in data must not be considered executable.
+    {
+        auto disabled=resolveSites(image);
+        assert(!disabled.loggerHooks);
+        assert((disabled.loggers==std::array<size_t,3>{}));
+    }
     for(auto& s:image.sections) s.flags&=~IMAGE_SCN_MEM_EXECUTE;
     reject();
 }
