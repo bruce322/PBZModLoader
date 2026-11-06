@@ -1,18 +1,24 @@
 #pragma once
-// Mapped PE snapshot. Addresses in descriptors are interpreted relative to origin,
-// which is the runtime base in-process and preferred ImageBase in file tests.
+#include <utility>
+// PE image view. Addresses are relative to origin: the runtime base in-process
+// and preferred ImageBase in file tests. Either owns a file copy (bytes) or
+// borrows an already mapped image (mapped).
 struct ImageSection { size_t begin, size; DWORD flags; };
 struct ImageView {
     Bytes bytes;
+    const unsigned char* mapped=nullptr;
     U64 origin;
     std::vector<ImageSection> sections;
+    ImageView(Bytes b,U64 o,std::vector<ImageSection> s):bytes(std::move(b)),origin(o),sections(std::move(s)) {}
+    ImageView(const unsigned char* m,U64 o,std::vector<ImageSection> s):mapped(m),origin(o),sections(std::move(s)) {}
+    const unsigned char* raw() const { return mapped ? mapped : bytes.data(); }
     bool contains(size_t at,size_t n,DWORD flags=0) const {
         for(auto s:sections) if((s.flags&flags)==flags && at>=s.begin && n<=s.size && at-s.begin<=s.size-n) return true;
         return false;
     }
     template<class T> T value(size_t at) const {
         if(!contains(at,sizeof(T))) throw std::runtime_error("Signature operand outside image sections");
-        T v; std::memcpy(&v,bytes.data()+at,sizeof(v)); return v;
+        T v; std::memcpy(&v,raw()+at,sizeof(v)); return v;
     }
     size_t relative(size_t at,size_t displacement,size_t length) const {
         auto target=(long long)at+length+value<int32_t>(at+displacement);
@@ -26,13 +32,14 @@ struct ImageView {
     }
     std::vector<size_t> find(const std::vector<int>& pattern) const {
         std::vector<size_t> hits;
+        const unsigned char* base=raw();
         for(auto s:sections) if(s.flags&IMAGE_SCN_MEM_EXECUTE) {
             if(pattern.empty() || s.size<pattern.size()) continue;
             size_t at=s.begin,end=s.begin+s.size-pattern.size()+1;
             while(at<end) {
-                auto p=(const unsigned char*)std::memchr(bytes.data()+at,pattern[0],end-at);
+                auto p=(const unsigned char*)std::memchr(base+at,pattern[0],end-at);
                 if(!p) break;
-                at=p-bytes.data(); bool match=true;
+                at=(size_t)(p-base); bool match=true;
                 for(size_t j=1;j<pattern.size();++j) if(pattern[j]>=0 && p[j]!=pattern[j]) { match=false; break; }
                 if(match) hits.push_back(at);
                 ++at;
@@ -93,7 +100,7 @@ HookSites resolveSites(const ImageView& image) {
             auto call=at+variant.second,start=image.relative(call,1,5);
             const Bytes thunk={0x48,0x8b,0x09,0x48,0x8b,0x01,0x48,0xff,0x20};
             if(!image.contains(start,thunk.size(),IMAGE_SCN_MEM_EXECUTE) ||
-               !std::equal(thunk.begin(),thunk.end(),image.bytes.begin()+start)) continue;
+               !std::equal(thunk.begin(),thunk.end(),image.raw()+start)) continue;
             sites.call=call; sites.start=start; rspLayout=variant.second==29; ++count;
         } catch(const std::exception&) { /* malformed candidate is not a match */ }
     }

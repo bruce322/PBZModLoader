@@ -13,6 +13,51 @@ void capture(void* context,const FString* name,void* argv) {
 int main() {
     HANDLE process=GetCurrentProcess();
     {
+        auto image=snapshotImage(process,(U64)(UINT_PTR)GetModuleHandleW(nullptr));
+        assert(image.bytes.empty());
+        assert(!image.sections.empty());
+        bool executable=false;
+        for(auto s:image.sections) if(s.flags&IMAGE_SCN_MEM_EXECUTE) {
+            assert(image.contains(s.begin,1,IMAGE_SCN_MEM_READ));
+            (void)image.value<unsigned char>(s.begin);
+            executable=true; break;
+        }
+        assert(executable);
+        std::cout<<"PASS mapped image view: no payload copy, executable section readable\n";
+    }
+    {
+        auto memory=(unsigned char*)VirtualAlloc(nullptr,8192,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(memory);
+        memory[0x100]=0x48; memory[0x101]=0x8b; memory[0x102]=0x01;
+        ImageView view{memory,(U64)(UINT_PTR)memory,{{0x100,3,IMAGE_SCN_MEM_READ|IMAGE_SCN_MEM_EXECUTE}}};
+        assert(view.bytes.empty());
+        assert(view.find({0x48,0x8b,0x01})==std::vector<size_t>{0x100});
+        assert(view.value<unsigned char>(0x101)==0x8b);
+        VirtualFree(memory,0,MEM_RELEASE);
+        std::cout<<"PASS mapped image view: borrowed bytes scan correctly\n";
+    }
+    {
+        auto guard=VirtualAlloc(nullptr,4096,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(guard);
+        DWORD old=0; assert(VirtualProtect(guard,4096,PAGE_NOACCESS,&old));
+        assert(!mappedReadable((U64)(UINT_PTR)guard,1));
+        VirtualFree(guard,0,MEM_RELEASE);
+        std::cout<<"PASS mapped image view: inaccessible pages rejected\n";
+    }
+    {
+        auto fake=(unsigned char*)VirtualAlloc(nullptr,0x10000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(fake);
+        std::memset(fake,0x90,0x10000);
+        const unsigned char start[]={0x48,0x8b,0x09,0x48,0x8b,0x01,0x48,0xff,0x20};
+        std::memcpy(fake+0x1100,start,sizeof(start));
+        ImageView view{fake,(U64)(UINT_PTR)fake,{{0x1000,0x500,IMAGE_SCN_MEM_READ|IMAGE_SCN_MEM_EXECUTE}}};
+        HookSites sites{}; sites.call=0x1000; sites.start=0x1100; sites.loggers={0x1200,0x1300,0x1400};
+        auto installed=install(process,(U64)(UINT_PTR)fake,view,sites);
+        assert(fake[0x1000]==0xe8);
+        assert(fake[0x1200]==0xe9 && fake[0x1300]==0xe9 && fake[0x1400]==0xe9);
+        assert(fake[0x1100]==0x48); // start thunk itself is not patched
+        VirtualFree((void*)installed.slab,0,MEM_RELEASE);
+        VirtualFree(fake,0,MEM_RELEASE);
+        std::cout<<"PASS mapped image view: install reads borrowed bytes\n";
+    }
+    {
         auto two=(unsigned char*)VirtualAlloc(nullptr,8192,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(two);
         DWORD old; assert(VirtualProtect(two,4096,PAGE_EXECUTE_READ,&old));
         Bytes cross={0x90,0x91,0x92,0x93,0x94}; patch(process,(U64)(two+4094),cross);

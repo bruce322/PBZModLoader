@@ -257,7 +257,24 @@ void rel32(Bytes& b,U64 from,U64 to) {
 }
 void absoluteJump(Bytes& b,U64 target) { b.insert(b.end(),{0xff,0x25,0,0,0,0}); imm64(b,target); }
 #include "signatures.hpp"
+bool mappedReadable(U64 at,size_t size) {
+    constexpr DWORD readable=PAGE_READONLY|PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY;
+    U64 end=at+size;
+    while(at<end) {
+        MEMORY_BASIC_INFORMATION info{};
+        if(!VirtualQuery((LPCVOID)(UINT_PTR)at,&info,sizeof(info))) return false;
+        if(info.State!=MEM_COMMIT || (info.Protect&(PAGE_NOACCESS|PAGE_GUARD)) || !(info.Protect&readable)) return false;
+        U64 next=(U64)(UINT_PTR)info.BaseAddress+info.RegionSize;
+        if(next<=at) return false;
+        at=next;
+    }
+    return true;
+}
+// Return a non-owning view of an image already mapped into this process. The
+// previous implementation allocated and copied SizeOfImage bytes at startup;
+// this version only records readable section ranges and reads headers.
 ImageView snapshotImage(HANDLE p,U64 base) {
+    if(p!=GetCurrentProcess()) throw std::runtime_error("Mapped image view requires current process");
     IMAGE_DOS_HEADER dos{}; read(p,base,&dos,sizeof(dos));
     if(dos.e_magic!=IMAGE_DOS_SIGNATURE || dos.e_lfanew<=0 || dos.e_lfanew>0x100000) throw std::runtime_error("Invalid PE DOS header");
     IMAGE_NT_HEADERS64 nt{}; read(p,base+dos.e_lfanew,&nt,sizeof(nt));
@@ -266,16 +283,17 @@ ImageView snapshotImage(HANDLE p,U64 base) {
        !nt.FileHeader.NumberOfSections || nt.FileHeader.NumberOfSections>96 ||
        !nt.OptionalHeader.SizeOfImage || nt.OptionalHeader.SizeOfImage>1024*1024*1024)
         throw std::runtime_error("Unsupported PE image");
-    ImageView image{Bytes(nt.OptionalHeader.SizeOfImage),base,{}};
+    const U64 imageSize=nt.OptionalHeader.SizeOfImage;
+    ImageView image{(const unsigned char*)base,base,{}};
     U64 table=dos.e_lfanew+24+nt.FileHeader.SizeOfOptionalHeader;
     if(table+nt.FileHeader.NumberOfSections*sizeof(IMAGE_SECTION_HEADER)>nt.OptionalHeader.SizeOfHeaders) throw std::runtime_error("Invalid PE section table");
     for(unsigned i=0;i<nt.FileHeader.NumberOfSections;++i) {
         IMAGE_SECTION_HEADER s{}; read(p,base+table+i*sizeof(s),&s,sizeof(s));
         size_t size=s.Misc.VirtualSize;
-        if(s.VirtualAddress>image.bytes.size() || size>image.bytes.size()-s.VirtualAddress) throw std::runtime_error("PE section exceeds image");
+        if(s.VirtualAddress>imageSize || size>imageSize-s.VirtualAddress) throw std::runtime_error("PE section exceeds image");
         if(!size || !(s.Characteristics&IMAGE_SCN_MEM_READ) || (s.Characteristics&IMAGE_SCN_MEM_DISCARDABLE)) continue;
         for(auto other:image.sections) if(s.VirtualAddress<other.begin+other.size && other.begin<s.VirtualAddress+size) throw std::runtime_error("Overlapping PE sections");
-        read(p,base+s.VirtualAddress,image.bytes.data()+s.VirtualAddress,size);
+        if(!mappedReadable(base+s.VirtualAddress,size)) throw std::runtime_error("PE section is not readable");
         image.sections.push_back({s.VirtualAddress,size,s.Characteristics});
     }
     return image;
@@ -331,13 +349,14 @@ Installed install(HANDLE p,U64 base,const ImageView& image,const HookSites& site
     Installed state;
     const auto& loggers=sites.loggers;
     std::array<Bytes,3> signatures;
-    for(int i=0;i<3;++i) signatures[i]=Bytes(image.bytes.begin()+loggers[i],image.bytes.begin()+loggers[i]+7);
-    const Bytes originalCall(image.bytes.begin()+sites.call,image.bytes.begin()+sites.call+5);
+    const unsigned char* imageBytes=image.raw();
+    for(int i=0;i<3;++i) signatures[i]=Bytes(imageBytes+loggers[i],imageBytes+loggers[i]+7);
+    const Bytes originalCall(imageBytes+sites.call,imageBytes+sites.call+5);
     auto verify=[&](U64 addr,const Bytes& expected) { Bytes got(expected.size()); read(p,addr,got.data(),got.size()); if(got!=expected) throw std::runtime_error("Instruction signature mismatch"); };
     verify(base+sites.call,originalCall);
     verify(base+sites.start,{0x48,0x8b,0x09,0x48,0x8b,0x01,0x48,0xff,0x20});
     if(sites.validateBytes && (!validateBytesHook || !validateTextHook)) throw std::runtime_error("Missing script validation adapters");
-    for(auto at:sites.validationCalls) if(at) verify(base+at,Bytes(image.bytes.begin()+at,image.bytes.begin()+at+5));
+    for(auto at:sites.validationCalls) if(at) verify(base+at,Bytes(imageBytes+at,imageBytes+at+5));
     for(int i=0;i<3;++i) verify(base+loggers[i],signatures[i]);
     state.slab=allocateNear(p,base+sites.call);
     try {
@@ -369,7 +388,7 @@ Installed install(HANDLE p,U64 base,const ImageView& image,const HookSites& site
         }
         for(size_t i=0;i<validators.size();++i) if(sites.validationCalls[i]) {
             auto at=sites.validationCalls[i];
-            state.patches.push_back({base+at,Bytes(image.bytes.begin()+at,image.bytes.begin()+at+5)});
+            state.patches.push_back({base+at,Bytes(imageBytes+at,imageBytes+at+5)});
             patch(p,base+at,validators[i]);
         }
         for(int i=0;i<3;++i) {
