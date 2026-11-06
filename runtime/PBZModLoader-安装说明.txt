@@ -15,11 +15,8 @@ WeGame 平台已实测可用，已确认 DLL 自动加载及 MOD 运行。
 更新前请备份自己的配置和 MOD；不要覆盖其他工具的同名 version.dll。
 使用备用入口更新时也不要把包内默认 version.dll 解压到 EXE 旁；只更新已选择的入口 DLL。
 更新加载器时需一并更新 DLL、bootstrap.js、manager.js，保留自己的 mods.ini 配置。
-mods.ini、mods/、evidence/ 与状态日志现在都位于 ProjectPBZ\Content\JavaScript\PBZModLoader。
-从旧版升级时，首次启动会自动把 ProjectPBZ\PBZModLoader 下的数据迁入新目录；
-若新目录已有 mods.ini，旧配置会覆盖它，包内默认配置备份为 mods.ini.before-migration，冲突文件不覆盖。
-旧版若使用 ProjectPBZ\Mods\PBZModLoader 层级，请将该层内的配置、mods 等内容整体上移到
-ProjectPBZ\Content\JavaScript\PBZModLoader，并同步更新 DLL；mods.ini 中原有相对 Entry 无需修改。
+mods.ini、mods/、evidence/ 与状态日志都位于 ProjectPBZ\Content\JavaScript\PBZModLoader。
+本版不读取、不迁移任何旧目录；从旧版升级请先删除旧的 ProjectPBZ\PBZModLoader（以及旧的 ProjectPBZ\Mods\PBZModLoader）后全新安装。
 
 备用入口（五选一）
 
@@ -42,14 +39,13 @@ dsound.dll、dxgi.dll；本加载器只需选择其中一个入口安装，不�
 安装和管理 MOD
 
 - 将整个 MOD 文件夹放入 ProjectPBZ\Content\JavaScript\PBZModLoader\mods，例如 mods\my-mod\main.js。
-  入口只支持 main.js；TypeScript MOD 需先在开发机构建为 main.js。
+  入口只支持已构建的 main.js；加载器不做 TS 解析或编译。
   文件夹名即 MOD ID，只使用英文字母、数字、下划线或连字符，不要多套一层 dist 目录。
 - 新 MOD 自动发现，无需添加配置。依赖脚本和资源应随 MOD 一起安装。
 - 在 ProjectPBZ\Content\JavaScript\PBZModLoader\mods.ini 的已有 [Mods] 段添加 my-mod=0 可禁用；
-  删除该行或改为 my-mod=1 可恢复。旧 Count / Mod.N 配置仍兼容，[Mods] 开关优先。
+  删除该行或改为 my-mod=1 可恢复。本版不读取 Count、Mod.N 或显式 Entry。
 - 更新 MOD 时建议退出游戏，用新版本的整个 MOD 目录替换旧目录，避免遗留脚本。
-  从 TS 版换成 JS 版时，直接放入构建后的 main.js；旧的 main.ts 不会被加载。
-  加载器不内置 TypeScript 编译器，也不读取 tsconfig.json；类型检查与构建应在发布前完成。
+  加载器只加载 JS；开发阶段如何构建 main.js 不属于加载器职责。
 
 热重载（Alt+F5）
 

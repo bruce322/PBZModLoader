@@ -26,12 +26,11 @@ PBZModLoader 是《影之刃零》（Phantom Blade Zero）的 MOD 加载器，�
 
 本仓库包含加载器源码、运行文件模板、SDK 和开发工具。玩家请从上方发布页面获取安装包；本地构建的玩家运行包位于 `releases/`，游戏安装目录只需保留运行文件。
 
-## 1.0.2：数据目录迁移
+## 1.0.2：数据目录调整
 
-运行时数据（`mods.ini`、`mods/`、`evidence/`、状态日志）统一迁入
-`ProjectPBZ/Content/JavaScript/PBZModLoader`。首次启动自动迁移旧
-`ProjectPBZ/PBZModLoader`：旧配置覆盖包内默认并备份为
-`mods.ini.before-migration`，目录冲突保留，旧缓存删除；旧目录为空后才删除。
+运行时数据（`mods.ini`、`mods/`、`evidence/`、状态日志）统一放在
+`ProjectPBZ/Content/JavaScript/PBZModLoader`。本版不读取、不迁移任何旧目录；
+从旧版升级需删除旧目录后全新安装，避免残留文件影响验证。
 启动不再复制 MOD 正文，热重载仍生成 revision 副本。
 
 ## 1.0.1：仅 JS 运行时与诊断改进
@@ -158,12 +157,9 @@ npm ci
 ```
 
 主工程和发布包均不预装 MOD；开发自己的 MOD 请使用上述独立模板。
-每次启动自动发现 `mods/<ID>/main.js`，按 ID 排序加载；TypeScript MOD 需先构建为 `main.js`。新增 MOD 无需修改配置。
-在 mods.ini 的 `[Mods]` 下设置 `ID=0` 可禁用，删除该行或设为 `1` 恢复。
-`[Loader]` 的 Enabled、Version 保留；Count 可省略。旧 Count / Mod.N 配置仍优先按编号加载，
-自动发现结果随后追加并去重；`[Mods]` 开关优先于旧项 Enabled。辅助脚本不会作为独立 MOD 加载。
-玩家的 mods.ini 与 mods/ 均位于 ProjectPBZ/Content/JavaScript/PBZModLoader，Entry 相对于该目录。
-从本版起旧目录会自动迁移：首次启动时，DLL 把 `ProjectPBZ/PBZModLoader` 下的配置、`mods/`、`evidence/` 和状态日志迁入新目录；如新目录已有 `mods.ini`，旧配置会覆盖它，包内默认配置备份为 `mods.ini.before-migration`，冲突文件不覆盖。旧版若使用 `ProjectPBZ/Mods/PBZModLoader` 层级，仍需按安装说明手动上移。`mods.ini` 中的 Entry 无需修改。
+每次启动自动发现 `mods/<ID>/main.js`，按 ID 排序加载；只加载已构建的 JavaScript。新增 MOD 只需放入目录，无需修改配置。
+在 mods.ini 的 `[Mods]` 下设置 `ID=0` 可禁用，删除该行或设为 `1` 恢复。`[Loader]` 必须包含 `Version=1` 与 `Enabled=1`；本版不再读取 Count、Mod.N 或显式 Entry。
+玩家的 mods.ini 与 mods/ 均位于 ProjectPBZ/Content/JavaScript/PBZModLoader。本版不做旧目录兼容或迁移；从旧版升级请删除旧目录后全新安装。
 启动时 DLL 只生成清单，直接加载 `mods/<ID>/main.js`，不再为启动复制 MOD 正文。热重载时才在 `Content/JavaScript/PBZModLoader/generated-reloads/<版本>/generated-mods/` 建立该版本的副本（复制而非硬链接，保证旧版本内容不被后续修改污染）；版本目录保留至下次启动清理，不应直接编辑。
 热重载默认关闭；在 mods.ini 的 [Loader] 设置 HotReload=1 并重启游戏后，按 Alt+F5 可触发，详见下文。
 Content/JavaScript/PBZModLoader 同时存放 bootstrap.js、manager.js、mods.ini、mods/、evidence/ 和状态日志；游戏原有 Content/JavaScript 下的其他内容不受影响。
@@ -183,11 +179,9 @@ package.ps1 拒绝覆盖已有版本，并检查 ZIP 根目录、白名单及解
 玩家不需要本主工程、Node.js、额外安装的编译器、Python、独立启动器或测试观察器。
 玩家安装、配置及卸载说明在 runtime/PBZModLoader-安装说明.txt，并随 ZIP 发布。
 
-### JavaScript 运行时与 TypeScript 构建
+### JavaScript 运行时
 
-加载器只发现和加载 `mods/<ID>/main.js` 及其引用的 JS 依赖，不再内置 TypeScript 编译器，也不读取 `main.ts`。只包含 `main.ts` 的目录会被忽略；若在 `mods.ini` 的 Entry 中显式写入 `.ts`，配置加载会直接报错：`TypeScript MODs are not supported; build main.ts to main.js`。
-
-TypeScript MOD 应使用 `templates/ts-mod` 在开发机执行 `npm ci`、`npm run check`、`npm run build`，把生成的 `dist/<ID>/` 中的 `main.js` 及依赖复制到 `mods/<ID>/`。加载器不做启动编译、不读取 `tsconfig.json`，也没有 `compile.log`；类型检查与构建都在发布前完成。旧版直接安装的 `main.ts` 需替换为构建后的 `main.js`。
+加载器只发现和加载 `mods/<ID>/main.js` 及其引用的 JS 依赖；不读取源码、不做编译、不提供 TypeScript 运行时。开发阶段如何生成 `main.js` 不属于加载器职责。
 
 ### MOD 热重载
 

@@ -185,11 +185,6 @@ extern "C" void pbz_initialize() noexcept {
         wchar_t system[32768]; check(GetModuleFileNameW(realVersion,system,32768)>0,"system version path");
         log("proxy-system="+utf8(system));
         log("project="+utf8(project.wstring()));
-        const fs::path legacy=project/L"PBZModLoader";
-        if(legacy!=root) {
-            try { migrateLegacy(legacy,root); }
-            catch(const std::exception& e) { log(std::string("legacy migration failed: ")+e.what()+"; original files kept"); }
-        }
         auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
         auto hotReload=ini(root/L"mods.ini",L"Loader",L"HotReload");
         auto loggerHooks=ini(root/L"mods.ini",L"Loader",L"LoggerHooks");

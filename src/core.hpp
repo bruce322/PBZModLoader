@@ -68,53 +68,23 @@ std::string config(const fs::path& root,const std::string& loadPrefix,std::vecto
     std::string prefix=loadPrefix;
     if(!prefix.empty() && prefix.back()!='/') prefix+='/';
     fs::path p=root/L"mods.ini"; if(!fs::is_regular_file(p)) throw std::runtime_error("Missing mods.ini");
-    // Windows profile APIs treat the BOM as part of the first section name. Reject
-    // instead of silently treating a partially parsed file as a legacy config.
     if(utf8Bom(p)) throw std::runtime_error("mods.ini has a UTF-8 BOM; save as UTF-8 without BOM or ANSI");
-    // Missing Version is a legacy config (pre-versioned mods.ini); only an explicit mismatch is fatal.
-    auto version=ini(p,L"Loader",L"Version");
-    if(!version.empty() && version!=L"1") throw std::runtime_error("Unsupported config version");
-    auto countValue=ini(p,L"Loader",L"Count");
-    int count=countValue.empty()?0:number(countValue,128); std::vector<std::string> ids;
-    struct Mod { std::string id,entry; bool enabled; };
-    std::vector<Mod> mods;
-    std::string result="'use strict';\nmodule.exports = {\"version\":1,\"mods\":[";
-    for(int i=0;i<count;++i) {
-        auto section=L"Mod."+std::to_wstring(i);
-        auto id=utf8(ini(p,section,L"Id")), entry=utf8(ini(p,section,L"Entry"));
-        if(fs::u8path(entry).extension()==L".ts") throw std::runtime_error("TypeScript MODs are not supported; build main.ts to main.js");
-        auto enabledValue=ini(p,section,L"Enabled");
-        auto enabled=enabledValue.empty()?1:number(enabledValue,1);
-        bool duplicate=false;
-        for(const auto& seen:ids) if(_stricmp(seen.c_str(),id.c_str())==0) { duplicate=true; break; }
-        if(entry.size()>512 || !std::regex_match(id,std::regex("[A-Za-z0-9_-]{1,64}")) || duplicate ||
-           !std::regex_match(entry,std::regex("mods/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.js"))) throw std::runtime_error("Invalid or duplicate MOD: "+id);
-        ids.push_back(id);
-        auto overrideValue=ini(p,L"Mods",fs::u8path(id).wstring().c_str());
-        if(!overrideValue.empty()) enabled=number(overrideValue,1);
-        mods.push_back({id,entry,enabled!=0});
-    }
-    // Only immediate child directories with main.js are MODs; other files
-    // are dependencies. Sort by ID so filesystem enumeration cannot reorder MODs.
+    if(ini(p,L"Loader",L"Version")!=L"1") throw std::runtime_error("Unsupported config version");
     std::map<std::string,std::string> discovered;
     if(fs::is_directory(root/L"mods")) for(const auto& item:fs::directory_iterator(root/L"mods")) {
         auto id=utf8(item.path().filename().wstring());
         if(!item.is_directory() || !std::regex_match(id,std::regex("[A-Za-z0-9_-]{1,64}")) ||
            !fs::is_regular_file(item.path()/L"main.js")) continue;
-        auto entry="mods/"+id+"/main.js";
-        bool configured=false;
-        for(const auto& mod:mods) if(_stricmp(mod.id.c_str(),id.c_str())==0 ||
-            _stricmp(fs::u8path(mod.entry).replace_extension().string().c_str(),fs::u8path(entry).replace_extension().string().c_str())==0) { configured=true; break; }
-        if(!configured) discovered.emplace(id,entry);
+        for(const auto& [seen,_]:discovered) if(_stricmp(seen.c_str(),id.c_str())==0)
+            throw std::runtime_error("Duplicate MOD id: "+id);
+        discovered.emplace(id,"mods/"+id+"/main.js");
     }
+    if(discovered.size()>128) throw std::runtime_error("Too many MODs (maximum 128)");
+    std::string result="'use strict';\nmodule.exports = {\"version\":1,\"mods\":[";
+    size_t index=0;
     for(const auto& [id,entry]:discovered) {
-        auto enabled=ini(p,L"Mods",fs::u8path(id).wstring().c_str());
-        mods.push_back({id,entry,enabled.empty() || number(enabled,1)!=0});
-    }
-    if(mods.size()>128) throw std::runtime_error("Too many MODs (maximum 128)");
-    for(size_t i=0;i<mods.size();++i) {
-        const auto& mod=mods[i];
-        const auto& id=mod.id; auto entry=mod.entry; bool enabled=mod.enabled;
+        auto enabledValue=ini(p,L"Mods",fs::u8path(id).wstring().c_str());
+        bool enabled=enabledValue.empty() || number(enabledValue,1)!=0;
         auto published=prefix+entry.substr(5);
         if(published.size()>512) throw std::runtime_error("MOD entry path too long: "+id);
         if(enabled) {
@@ -122,20 +92,16 @@ std::string config(const fs::path& root,const std::string& loadPrefix,std::vecto
             auto relative=file.lexically_relative(fs::canonical(root/L"mods"));
             if(relative.empty() || *relative.begin()==L".." || !fs::is_regular_file(file)) throw std::runtime_error("Missing or escaped entry: "+entry);
         }
-        if(i) result+=",";
+        if(index++) result+=",";
         result+="{\"id\":\""+id+"\",\"enabled\":"+(enabled?"true":"false")+",\"entry\":\""+published+"\"}";
-    }
-    if(out) {
-        out->clear();
-        for(const auto& mod:mods) out->push_back({mod.id,mod.entry,mod.enabled});
+        if(out) out->push_back({id,entry,enabled});
     }
     return result+"]};\n";
 }
 // PuerTS still reads from its JavaScript search root. This disposable cache is
 // only used for hot-reload snapshots; startup config loads MODs in place.
-void syncMods(const fs::path& root,const fs::path& scripts,bool snapshot=false) {
+void syncMods(const fs::path& root,const fs::path& scripts) {
     const auto source=root/L"mods", cache=scripts/L"generated-mods";
-    // Reject reparse points so neither hardlinking, copying nor cleanup follows a junction.
     auto rejectLink=[](const fs::path& path) {
         auto attributes=GetFileAttributesW(path.c_str());
         if(attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT))
@@ -146,9 +112,6 @@ void syncMods(const fs::path& root,const fs::path& scripts,bool snapshot=false) 
     if(fs::exists(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) rejectLink(item.path());
     fs::remove_all(cache); fs::create_directories(cache);
     if(!fs::exists(source)) return;
-    // Hard links keep the JavaScript search-root depth without copying MOD bytes.
-    // Files on a volume without hard-link support fall back to an ordinary copy.
-    bool copied=false;
     for(const auto& item:fs::recursive_directory_iterator(source)) {
         rejectLink(item.path());
         auto relative=item.path().lexically_relative(source);
@@ -156,13 +119,10 @@ void syncMods(const fs::path& root,const fs::path& scripts,bool snapshot=false) 
         if(item.is_directory()) { fs::create_directories(destination); continue; }
         if(!item.is_regular_file()) continue;
         fs::create_directories(destination.parent_path());
-        if(!snapshot && CreateHardLinkW(destination.c_str(),item.path().c_str(),nullptr)) continue;
         std::error_code error;
         fs::copy_file(item.path(),destination,fs::copy_options::overwrite_existing,error);
         if(error) throw std::runtime_error("MOD cache materialization failed: "+error.message());
-        if(!snapshot) copied=true;
     }
-    if(copied) log("hard links unavailable for some MOD files; copied fallback used");
 }
 void resetGenerated(const fs::path& scripts) {
     auto cache=scripts/L"generated-mods";
@@ -176,76 +136,6 @@ void resetGenerated(const fs::path& scripts) {
     fs::remove_all(cache);
 }
 
-inline void mergeLegacyDirectory(const fs::path& source,const fs::path& destination) {
-    if(!fs::exists(source)) return;
-    fs::create_directories(destination);
-    std::vector<fs::path> items;
-    for(const auto& item:fs::directory_iterator(source)) items.push_back(item.path());
-    for(const auto& path:items) {
-        auto target=destination/path.filename();
-        if(!fs::exists(target)) { fs::rename(path,target); continue; }
-        if(fs::is_directory(path) && fs::is_directory(target)) {
-            mergeLegacyDirectory(path,target);
-        } else {
-            log("legacy migration conflict: kept "+utf8(target.wstring())+"; left "+utf8(path.wstring()));
-        }
-    }
-    std::error_code error;
-    if(fs::is_empty(source,error) && !error) fs::remove(source,error);
-}
-
-inline void moveLegacyFile(const fs::path& source,const fs::path& destination) {
-    if(!fs::exists(source)) return;
-    if(fs::exists(destination)) {
-        log("legacy migration conflict: kept "+utf8(destination.wstring())+"; left "+utf8(source.wstring()));
-        return;
-    }
-    fs::create_directories(destination.parent_path());
-    fs::rename(source,destination);
-}
-
-void migrateLegacy(const fs::path& legacy,const fs::path& root) {
-    if(!fs::is_directory(legacy)) return;
-    auto reject=[](const fs::path& path) {
-        auto attributes=GetFileAttributesW(path.c_str());
-        if(attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT))
-            throw std::runtime_error("Legacy data must not contain reparse points");
-    };
-    reject(legacy);
-    for(const auto& item:fs::recursive_directory_iterator(legacy)) reject(item.path());
-    log("legacy data directory found: "+utf8(legacy.wstring())+"; migrating");
-    fs::create_directories(root);
-    const auto legacyIni=legacy/L"mods.ini", targetIni=root/L"mods.ini";
-    if(fs::is_regular_file(legacyIni)) {
-        if(fs::exists(targetIni)) {
-            fs::copy_file(targetIni,root/L"mods.ini.before-migration",fs::copy_options::overwrite_existing);
-            fs::copy_file(legacyIni,targetIni,fs::copy_options::overwrite_existing);
-            fs::remove(legacyIni);
-            log("legacy mods.ini migrated over packaged default; previous default saved as mods.ini.before-migration");
-        } else {
-            fs::rename(legacyIni,targetIni);
-            log("legacy mods.ini migrated");
-        }
-    }
-    moveLegacyFile(legacy/L"loader-status.log",root/L"loader-status.log");
-    moveLegacyFile(legacy/L"loader-initializing.marker",root/L"loader-initializing.marker");
-    mergeLegacyDirectory(legacy/L"mods",root/L"mods");
-    mergeLegacyDirectory(legacy/L"evidence",root/L"evidence");
-    for(const wchar_t* name : {L"generated-mods",L"generated-reloads",L"generated-config.js"}) {
-        auto cache=legacy/name;
-        if(fs::exists(cache)) { fs::remove_all(cache); log("legacy cache removed: "+utf8(cache.wstring())); }
-    }
-    std::vector<fs::path> remaining;
-    for(const auto& item:fs::directory_iterator(legacy)) remaining.push_back(item.path());
-    for(const auto& path:remaining) {
-        auto name=path.filename().wstring();
-        if(name==L"mods" || name==L"evidence" || name==L"mods.ini" || name==L"loader-status.log" || name==L"loader-initializing.marker") continue;
-        moveLegacyFile(path,root/name);
-    }
-    std::error_code error;
-    if(fs::is_empty(legacy,error) && !error) { fs::remove(legacy,error); log("legacy data directory removed"); }
-    else log("legacy data directory retained; inspect remaining files: "+utf8(legacy.wstring()));
-}
 
 void resetReloads(const fs::path& scripts) {
     auto cache=scripts/L"generated-reloads";
@@ -264,7 +154,7 @@ void publishReload(const fs::path& root,const fs::path& scripts,unsigned revisio
     auto stage=cache/L"pending";
     fs::create_directories(stage);
     // Owned staging directory; reuse syncMods' reparse checks before cleanup.
-    syncMods(root,stage,true);
+    syncMods(root,stage);
     auto generated=config(root,"./generated-reloads/"+std::to_string(revision)+"/generated-mods/");
     auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
     if(!enabled.empty() && number(enabled,1)==0) generated="module.exports={version:1,mods:[]};\n";

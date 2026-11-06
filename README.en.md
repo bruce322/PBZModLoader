@@ -26,14 +26,12 @@ Install Node.js and npm on your development machine, then run `npm ci`, `npm run
 
 This repository contains loader source code, runtime file templates, the SDK, and development tools. Players should download an installation package from the release page above. Locally built player packages are placed in `releases/`; only runtime files belong in the game installation directory.
 
-## 1.0.2: Data directory migration
+## 1.0.2: data layout
 
-Runtime data (`mods.ini`, `mods/`, `evidence/`, and status logs) now lives under
-`ProjectPBZ/Content/JavaScript/PBZModLoader`. On the first launch the loader
-migrates an older `ProjectPBZ/PBZModLoader`: the legacy configuration replaces
-the packaged default (which is saved as `mods.ini.before-migration`), conflicting
-files are kept, old caches are removed, and the old directory is deleted only
-when empty. Startup no longer copies MOD bodies; hot reload still creates
+Runtime data (`mods.ini`, `mods/`, `evidence/`, and status logs) lives under
+`ProjectPBZ/Content/JavaScript/PBZModLoader`. This release does not read or
+migrate older directories; upgrade by removing the old directory and installing
+fresh. Startup no longer copies MOD bodies; hot reload still creates
 per-revision copies.
 
 ## 1.0.1: JS-only runtime and diagnostics
@@ -132,9 +130,9 @@ npm ci
 
 Neither the main project nor release packages include preinstalled mods. Use the standalone template above to develop your own.
 
-On each startup, the loader automatically discovers `mods/<ID>/main.js` and loads mods in ID order. TypeScript mods must be built to `main.js` first. Adding a mod requires no configuration changes. Set `ID=0` under `[Mods]` in `mods.ini` to disable it; delete the line or set it to `1` to enable it again. `Enabled` and `Version` under `[Loader]` are retained; `Count` can be omitted. Legacy `Count` / `Mod.N` entries are still loaded first in numerical order, followed by automatically discovered entries with duplicates removed. `[Mods]` switches take precedence over legacy `Enabled` values. Helper scripts are not loaded as separate mods.
+On each startup, the loader automatically discovers `mods/<ID>/main.js` and loads mods in ID order. Only built JavaScript is loaded; adding a mod requires no configuration changes. Set `ID=0` under `[Mods]` in `mods.ini` to disable it; delete the line or set it to `1` to enable it again. `[Loader]` must contain `Version=1` and `Enabled=1`; this release does not read `Count`, `Mod.N`, or explicit `Entry` values.
 
-The player's `mods.ini` and `mods/` reside in `ProjectPBZ/Content/JavaScript/PBZModLoader`, and `Entry` paths are relative to that directory. Starting with this release, an older `ProjectPBZ/PBZModLoader` directory is migrated automatically on first launch: configuration, `mods/`, `evidence/`, and status logs are moved into the new directory. If the new directory already has a `mods.ini`, the legacy configuration replaces it and the packaged default is saved as `mods.ini.before-migration`; conflicting files are not overwritten. Installations using the older `ProjectPBZ/Mods/PBZModLoader` level still need the manual move described in the installation instructions. `Entry` values in `mods.ini` do not need changing.
+The player's `mods.ini` and `mods/` reside in `ProjectPBZ/Content/JavaScript/PBZModLoader`. This release performs no legacy-directory compatibility or migration; upgrade by removing the old directory and installing fresh.
 
 At startup, the DLL writes the manifest and loads `mods/<ID>/main.js` in place; it no longer copies MOD bodies for startup. Only hot reload creates a per-revision copy at `Content/JavaScript/PBZModLoader/generated-reloads/<revision>/generated-mods/` (a copy, not a hard link, so later edits cannot change an older revision); revision directories are cleaned up on the next startup and must not be edited directly. Hot reload is off by default; set `HotReload=1` under `[Loader]` in `mods.ini` and restart the game before using Alt+F5 (see below). `Content/JavaScript/PBZModLoader` also holds `bootstrap.js`, `manager.js`, `mods.ini`, `mods/`, `evidence/`, and the status log; unrelated files under the game's `Content/JavaScript` are untouched.
 
@@ -146,11 +144,9 @@ The first reorganized release, 0.2.0, used the same DLL that had already passed 
 
 Players do not need this source project, Node.js, a separately installed compiler, Python, a standalone launcher, or a test observer. Player installation, configuration, and uninstall instructions are in `runtime/PBZModLoader-安装说明.txt` (Chinese), included in the release ZIP.
 
-### JavaScript runtime and TypeScript builds
+### JavaScript runtime
 
-The loader only discovers and loads `mods/<ID>/main.js` and its referenced JS dependencies. It no longer bundles a TypeScript compiler and does not read `main.ts`. A directory containing only `main.ts` is ignored; an explicit `.ts` Entry in `mods.ini` fails configuration with: `TypeScript MODs are not supported; build main.ts to main.js`.
-
-Build TypeScript mods on the development machine with `templates/ts-mod`: run `npm ci`, `npm run check`, and `npm run build`, then copy `main.js` and its dependencies from `dist/<ID>/` into `mods/<ID>/`. The loader performs no startup compilation, does not read `tsconfig.json`, and produces no `compile.log`; type checking and builds happen before release. Replace any previously installed `main.ts` with the built `main.js`.
+The loader only discovers and loads `mods/<ID>/main.js` and its referenced JavaScript dependencies. It does not read source, perform compilation, or provide a TypeScript runtime. How developers produce `main.js` is outside the loader's scope.
 
 ### Mod hot reload
 
