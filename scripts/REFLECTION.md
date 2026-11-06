@@ -101,8 +101,8 @@ Vector 字段、Actor 继承、GetPlayerPawn 签名、EAxis 枚举。
 它不主动加载资产、不创建 Actor，也不采集函数签名。`IsSearchAllAssets=false` 时尤其不能将该快照
 宣称为全部可发现资产；报告不能衡量普通 JS 模块或未反射 C++ 的覆盖率。
 
-1. 备份游戏安装目录的 `PBZModLoader/mods.ini`，临时禁用其他 MOD。
-2. 将探针复制为 `PBZModLoader/mods/asset-inventory-dev/main.js`。
+1. 备份游戏安装目录的 `ProjectPBZ/Content/JavaScript/PBZModLoader/mods.ini`，临时禁用其他 MOD。
+2. 将探针复制为 `ProjectPBZ/Content/JavaScript/PBZModLoader/mods/asset-inventory-dev/main.js`。
 3. 必须通过 `scripts/影之刃零-窗口模式1280x720.cmd` 启动；已运行时用恢复脚本。
    `powershell -NoProfile -File scripts/PBZ-Windowed.ps1 -Status` 提供只读客户区检查，
    返回 `valid=true` 才能开始测试。探针另外检查游戏设置的 1280×720、窗口模式 2。
@@ -142,7 +142,7 @@ PBZCombatAsset、Game、HuaShira、其他目录排序，只处理有登记表依
   "batches": "build/type-batches/batches.json",
   "archive": "build/type-batches/checkpoints",
   "reflectionRoot": "build/reflection",
-  "log": "D:/game/ProjectPBZ/PBZModLoader/evidence/<run>/loader.log",
+  "log": "D:/game/ProjectPBZ/Content/JavaScript/PBZModLoader/evidence/<run>/loader.log",
   "commandDir": "D:/game/ProjectPBZ/Content/JavaScript/PBZModLoader/generated-mods/load-types-dev/commands"
 }
 ```

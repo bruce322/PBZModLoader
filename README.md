@@ -14,7 +14,7 @@ PBZModLoader 是《影之刃零》（Phantom Blade Zero）的 MOD 加载器，�
 
 想制作自己的 MOD，可从 [TypeScript MOD 最小模板](templates/ts-mod/) 开始，详细步骤见 [模板开发说明](templates/ts-mod/README.md)。模板包含示例入口、构建脚本和游戏 API SDK，提供 UE / PuerTS 类型补全与严格类型检查；复制整个模板目录即可独立开发，无需编译加载器 C++ 工程。
 
-开发电脑安装 Node.js 和 npm 后，在模板副本中依次执行 `npm ci`、`npm run check`、`npm run build`。修改 `src/main.ts` 编写逻辑，将构建生成的 `dist/my-mod/` 整个文件夹放入游戏的 `ProjectPBZ/PBZModLoader/mods/`，即可由加载器自动发现。玩家只需安装加载器和构建后的 MOD，无需安装开发工具。
+开发电脑安装 Node.js 和 npm 后，在模板副本中依次执行 `npm ci`、`npm run check`、`npm run build`。修改 `src/main.ts` 编写逻辑，将构建生成的 `dist/my-mod/` 整个文件夹放入游戏的 `ProjectPBZ/Content/JavaScript/PBZModLoader/mods/`，即可由加载器自动发现。玩家只需安装加载器和构建后的 MOD，无需安装开发工具。
 
 ### 技术路线
 
@@ -124,7 +124,7 @@ Steam 和 WeGame 首次安装均可直接解压到游戏根目录，合并同名
 
 开发自己的 TS MOD 可从 [最小开发模板](templates/ts-mod/README.md) 开始：复制 `templates/ts-mod/`，
 在副本中执行 `npm ci`、`npm run check`、`npm run build`，将输出的 `dist/my-mod/` 安装到
-游戏的 `ProjectPBZ/PBZModLoader/mods/`。模板独立维护开发依赖，不需要编译加载器 DLL。
+游戏的 `ProjectPBZ/Content/JavaScript/PBZModLoader/mods/`。模板独立维护开发依赖，不需要编译加载器 DLL。
 
 模板已通过本地开发依赖引用 [游戏 API SDK](sdk/README.md)，直接 `import ... from 'ue'` / `'puerts'`
 即可获得补全和类型检查。SDK 0.3.3 基于 2026-11-04 更新的 Steam 构建 CL-302256_JKS-17280 重新采集，
@@ -148,13 +148,11 @@ npm ci
 在 mods.ini 的 `[Mods]` 下设置 `ID=0` 可禁用，删除该行或设为 `1` 恢复。
 `[Loader]` 的 Enabled、Version 保留；Count 可省略。旧 Count / Mod.N 配置仍优先按编号加载，
 自动发现结果随后追加并去重；`[Mods]` 开关优先于旧项 Enabled。辅助脚本不会作为独立 MOD 加载。
-玩家的 mods.ini 与 mods/ 均位于 ProjectPBZ/PBZModLoader，Entry 相对于该目录。
-旧版带 Mods 层的目录需整体上移到 ProjectPBZ/PBZModLoader，并同步更新 DLL；
-具体迁移步骤见安装说明，mods.ini 中的 Entry 无需修改。
-启动时 DLL 只生成清单，并在 Content/JavaScript/PBZModLoader/generated-mods 建立指向 mods/ 的硬链接视图
-（同卷零字节；不支持硬链接时回退复制），不复制 MOD 正文。该缓存每次启动重建，不应直接编辑。
+玩家的 mods.ini 与 mods/ 均位于 ProjectPBZ/Content/JavaScript/PBZModLoader，Entry 相对于该目录。
+从本版起旧目录会自动迁移：首次启动时，DLL 把 `ProjectPBZ/PBZModLoader` 下的配置、`mods/`、`evidence/` 和状态日志迁入新目录；如新目录已有 `mods.ini`，旧配置会覆盖它，包内默认配置备份为 `mods.ini.before-migration`，冲突文件不覆盖。旧版若使用 `ProjectPBZ/Mods/PBZModLoader` 层级，仍需按安装说明手动上移。`mods.ini` 中的 Entry 无需修改。
+启动时 DLL 只生成清单，直接加载 `mods/<ID>/main.js`，不再为启动复制 MOD 正文。热重载时才在 `Content/JavaScript/PBZModLoader/generated-reloads/<版本>/generated-mods/` 建立该版本的副本（复制而非硬链接，保证旧版本内容不被后续修改污染）；版本目录保留至下次启动清理，不应直接编辑。
 热重载默认关闭；在 mods.ini 的 [Loader] 设置 HotReload=1 并重启游戏后，按 Alt+F5 可触发，详见下文。
-Content/JavaScript 下只需随包安装 bootstrap.js 和 manager.js，MOD 源文件无需放在那里。
+Content/JavaScript/PBZModLoader 同时存放 bootstrap.js、manager.js、mods.ini、mods/、evidence/ 和状态日志；游戏原有 Content/JavaScript 下的其他内容不受影响。
 原生编译输出 build 下的 version.dll、hid.dll、winmm.dll、dsound.dll、dxgi.dll。
 -VerifyOnly -Test 可检查已有 DLL 而不重新编译它们。
 package.ps1 拒绝覆盖已有版本，并检查 ZIP 根目录、白名单及解压后全部文件哈希。
@@ -179,7 +177,7 @@ TypeScript MOD 应使用 `templates/ts-mod` 在开发机执行 `npm ci`、`npm r
 
 ### MOD 热重载
 
-热重载默认关闭。先在 `mods.ini` 的 `[Loader]` 段设置 `HotReload=1` 并重启游戏（默认 0 时 Alt+F5 不会注册）。启用后，保存 `ProjectPBZ/PBZModLoader/mods/` 下的 JS 或依赖文件，切回游戏按 **Alt+F5**。仅游戏窗口在前台时响应，按住不连发，不监听文件变化。JS 线程每秒接收一次重载请求。本地构建的 MOD 需先把新产物覆盖到安装目录。完成后左上角显示约 4 秒提示，区分成功、失败或跳过；提示不拦截鼠标。
+热重载默认关闭。先在 `mods.ini` 的 `[Loader]` 段设置 `HotReload=1` 并重启游戏（默认 0 时 Alt+F5 不会注册）。启用后，保存 `ProjectPBZ/Content/JavaScript/PBZModLoader/mods/` 下的 JS 或依赖文件，切回游戏按 **Alt+F5**。仅游戏窗口在前台时响应，按住不连发，不监听文件变化。JS 线程每秒接收一次重载请求。本地构建的 MOD 需先把新产物覆盖到安装目录。完成后左上角显示约 4 秒提示，区分成功、失败或跳过；提示不拦截鼠标。
 
 每次快捷键重载整组 MOD（包括未修改的 MOD），以独立版本目录（副本）隔离 CommonJS 入口及相对依赖缓存。加载新入口前，先调用并等待所有旧实例导出的 `stop()`，支持 Promise；MOD 须在其中清除定时器、取消事件订阅并释放持有的资源。无持久资源的 MOD 也应导出空 `stop()`。缺少该函数或清理抛错时保留旧实例并跳过该 MOD，新版本不会重复注册。`stop()` 超过 5 秒未完成时判定清理失败，保留旧实例并跳过该 MOD（日志 `reload blocked ... stop() timed out`），本次运行不再重试；期间不会启动另一轮重载。切图和游戏退出不触发 stop。
 
@@ -194,8 +192,8 @@ TypeScript MOD 应使用 `templates/ts-mod` 在开发机执行 `npm ci`、`npm r
 - `LoggerHooks=1`（默认）：签名完整时安装诊断钩子；`0` 关闭。
 - `SafeMode=1`：本次运行关闭诊断钩子和 Alt+F5 热重载，用于排查崩溃；默认 `0`。
 
-排查启动崩溃时可先设 `SafeMode=1`。若 `ProjectPBZ/PBZModLoader/loader-initializing.marker` 残留，状态日志会写 `previous-run=unclean`；加载器成功初始化后会删除该标记。状态日志同时列出 `logger-hooks` 与 `safe-mode` 状态。
+排查启动崩溃时可先设 `SafeMode=1`。若 `ProjectPBZ/Content/JavaScript/PBZModLoader/loader-initializing.marker` 残留，状态日志会写 `previous-run=unclean`；加载器成功初始化后会删除该标记。状态日志同时列出 `logger-hooks` 与 `safe-mode` 状态。
 
 ### 玩家可读状态
 
-每次启动会在 `ProjectPBZ/PBZModLoader/loader-status.log` 覆盖写入一份简表：加载器版本、游戏路径与大小、入口 DLL、MOD 总数/启用/禁用及列表、挂钩/诊断/安全模式状态、热重载开关和 evidence 日志路径；重载结果会追加到同一文件。该文件是只读摘要，详细原因仍看 `evidence/<本次运行>/loader.log`。
+每次启动会在 `ProjectPBZ/Content/JavaScript/PBZModLoader/loader-status.log` 覆盖写入一份简表：加载器版本、游戏路径与大小、入口 DLL、MOD 总数/启用/禁用及列表、挂钩/诊断/安全模式状态、热重载开关和 evidence 日志路径；重载结果会追加到同一文件。该文件是只读摘要，详细原因仍看 `evidence/<本次运行>/loader.log`。

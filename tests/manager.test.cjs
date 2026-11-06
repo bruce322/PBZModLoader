@@ -6,18 +6,18 @@ const vm = require('node:vm');
 const path = require('node:path');
 const base = path.resolve(__dirname, '../runtime/ProjectPBZ/Content/JavaScript/PBZModLoader');
 const { load } = require(path.join(base, 'manager.js'));
-const mod = (id, enabled = true, entry = './generated-mods/' + id + '/main.js') => ({ id, enabled, entry });
+const mod = (id, enabled = true, entry = './mods/' + id + '/main.js') => ({ id, enabled, entry });
 test('ordered loading, disabled entries, failure isolation', () => {
     const calls = [], logs = [];
     const result = load({ version: 1, mods: [mod('a'), mod('off', false), mod('bad'), mod('b')] }, entry => {
         calls.push(entry); if (entry.includes('/bad/')) throw new Error('intentional'); return { entry };
     }, line => logs.push(line));
-    assert.deepEqual(calls, ['./generated-mods/a/main.js', './generated-mods/bad/main.js', './generated-mods/b/main.js']);
+    assert.deepEqual(calls, ['./mods/a/main.js', './mods/bad/main.js', './mods/b/main.js']);
     assert.deepEqual(result.map(m => m.status), ['loaded', 'disabled', 'failed', 'loaded']);
     assert.match(logs[2], /intentional/);
 });
 test('invalid config rejected before any MOD executes', () => {
-    for (const mods of [[mod('a'), mod('a')], [mod('A'), mod('a')], [mod('a', true, './generated-mods/../escape.js')], [mod('a', true, './generated-mods/b/main.js')], [mod('a', true, './generated-mods/a/b/main.js')], [mod('a', true, './generated-mods/a/main.ts')], [mod('a', 'true')], [mod('a', true, './generated-reloads/x/generated-mods/a/main.js')], [mod('a', true, './generated-mods/' + 'x'.repeat(520) + '/main.js')]]) {
+    for (const mods of [[mod('a'), mod('a')], [mod('A'), mod('a')], [mod('a', true, './mods/../escape.js')], [mod('a', true, './mods/b/main.js')], [mod('a', true, './mods/a/b/main.js')], [mod('a', true, './generated-mods/a/main.js')], [mod('a', true, './mods/a/main.ts')], [mod('a', 'true')], [mod('a', true, './generated-reloads/x/generated-mods/a/main.js')], [mod('a', true, './mods/' + 'x'.repeat(520) + '/main.js')]]) {
         let calls = 0;
         assert.throws(() => load({version: 1, mods}, () => { calls++; }, () => {}));
         assert.equal(calls, 0);
@@ -55,7 +55,7 @@ test('reload awaits cleanup before executing any new MOD and isolates cleanup fa
     const result = await reload(old, { version: 1, mods: [mod('a'), mod('b')] }, entry => {
         calls.push(entry); return {};
     }, () => {});
-    assert.deepEqual(calls, ['stop a', 'stop removed', './generated-mods/a/main.js']);
+    assert.deepEqual(calls, ['stop a', 'stop removed', './mods/a/main.js']);
     assert.equal(result[1], old[1]);
 });
 
@@ -77,7 +77,7 @@ test('missing stop and failed evaluation cannot duplicate registrations; disable
     const old = [{ id: 'a', status: 'loaded', instance: {} }, { id: 'bad', status: 'failed' }, { id: 'off', status: 'disabled' }];
     const calls = [];
     const result = await reload(old, { version: 1, mods: [mod('a'), mod('bad'), mod('off')] }, entry => { calls.push(entry); return {}; }, () => {});
-    assert.deepEqual(calls, ['./generated-mods/off/main.js']);
+    assert.deepEqual(calls, ['./mods/off/main.js']);
     assert.equal(result[0], old[0]);
     assert.equal(result[1], old[1]);
     await assert.rejects(reload(old, { version: 2, mods: [] }, () => {}, () => {}));

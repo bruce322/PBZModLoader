@@ -31,8 +31,8 @@ try {
         $fixtureRoot=Join-Path $PSScriptRoot ('build/proxy-fixture/'+$layout.Replace('/','-'))
         $fixture=Join-Path $fixtureRoot $layout
         $runtime=Join-Path $fixtureRoot 'ProjectPBZ'
-        New-Item -ItemType Directory -Force "$runtime/PBZModLoader","$runtime/Content/JavaScript/PBZModLoader" | Out-Null
-        Set-Content "$runtime/PBZModLoader/mods.ini" '[Loader]'
+        New-Item -ItemType Directory -Force "$runtime/Content/JavaScript/PBZModLoader" | Out-Null
+        Set-Content "$runtime/Content/JavaScript/PBZModLoader/mods.ini" '[Loader]'
         Set-Content "$runtime/Content/JavaScript/PBZModLoader/bootstrap.js" '// fixture'
         New-Item -ItemType Directory -Force $fixture | Out-Null
         & $Compiler -std=c++17 -O2 -Wall -Wextra -static tests/proxy-host.cpp -lversion -o "$fixture/PBZ.exe"
@@ -40,7 +40,7 @@ try {
         Copy-Item -LiteralPath build/version.dll -Destination "$fixture/version.dll" -Force
         & "$fixture/PBZ.exe"
         if ($LASTEXITCODE -ne 0) { throw 'Proxy tests failed' }
-        $logs=@(Get-ChildItem "$runtime/PBZModLoader/evidence" -Filter loader.log -Recurse | Sort-Object LastWriteTime -Descending)
+        $logs=@(Get-ChildItem "$runtime/Content/JavaScript/PBZModLoader/evidence" -Filter loader.log -Recurse | Sort-Object LastWriteTime -Descending)
         if (!$logs.Count -or !(Select-String -LiteralPath $logs[0].FullName -SimpleMatch 'MainStart signature requires one validated match; found=0')) { throw 'Missing signature rejection evidence' }
         Write-Output "PASS platform layout: $layout, entry restored and unsupported host skipped"
         }
@@ -54,15 +54,15 @@ try {
         foreach ($proxy in $proxies) {
             $fixture=Join-Path $PSScriptRoot "build/alternate-fixture/$proxy/platform/steam"
             $runtime=Join-Path $PSScriptRoot "build/alternate-fixture/$proxy/ProjectPBZ"
-            New-Item -ItemType Directory -Force $fixture,"$runtime/PBZModLoader","$runtime/Content/JavaScript/PBZModLoader" | Out-Null
-            Set-Content "$runtime/PBZModLoader/mods.ini" '[Loader]'
+            New-Item -ItemType Directory -Force $fixture,"$runtime/Content/JavaScript/PBZModLoader" | Out-Null
+            Set-Content "$runtime/Content/JavaScript/PBZModLoader/mods.ini" '[Loader]'
             Set-Content "$runtime/Content/JavaScript/PBZModLoader/bootstrap.js" '// fixture'
             Copy-Item "build/$proxy.dll" "$fixture/$proxy.dll" -Force
             & $Compiler -std=c++17 -O2 -Wall -Wextra -static "-DPBZ_TEST_$($proxy.ToUpper())" tests/alternate-proxy-host.cpp "-l$proxy" -o "$fixture/PBZ.exe"
             if ($LASTEXITCODE -ne 0) { throw "Host build failed: $proxy" }
             & "$fixture/PBZ.exe"
             if ($LASTEXITCODE -ne 0) { throw "Host failed: $proxy" }
-            $logs=@(Get-ChildItem "$runtime/PBZModLoader/evidence" -Filter loader.log -Recurse | Sort-Object LastWriteTime -Descending)
+            $logs=@(Get-ChildItem "$runtime/Content/JavaScript/PBZModLoader/evidence" -Filter loader.log -Recurse | Sort-Object LastWriteTime -Descending)
             if (!$logs.Count -or !(Select-String -LiteralPath $logs[0].FullName -SimpleMatch 'MainStart signature requires one validated match; found=0')) { throw "Missing rejection evidence: $proxy" }
             $imports=& $readobj --coff-imports "build/$proxy.dll"
             if ($LASTEXITCODE -ne 0 -or $imports -match 'Symbol: (DebugActiveProcess|WriteProcessMemory|CreateRemoteThread)\b') { throw "Import audit failed: $proxy" }
@@ -79,8 +79,8 @@ try {
         foreach($mode in @('DUPLICATE','LATE')) {
             $fixture=Join-Path $PSScriptRoot "build/alternate-fixture/$mode/platform/steam"
             $runtime=Join-Path $PSScriptRoot "build/alternate-fixture/$mode/ProjectPBZ"
-            New-Item -ItemType Directory -Force $fixture,"$runtime/PBZModLoader","$runtime/Content/JavaScript/PBZModLoader" | Out-Null
-            Set-Content "$runtime/PBZModLoader/mods.ini" '[Loader]'
+            New-Item -ItemType Directory -Force $fixture,"$runtime/Content/JavaScript/PBZModLoader" | Out-Null
+            Set-Content "$runtime/Content/JavaScript/PBZModLoader/mods.ini" '[Loader]'
             Set-Content "$runtime/Content/JavaScript/PBZModLoader/bootstrap.js" '// fixture'
             Copy-Item build/version.dll,build/hid.dll $fixture -Force
             $flags=@(if($mode -eq 'DUPLICATE'){'-DPBZ_TEST_HID';'-lhid'}else{'-DPBZ_TEST_VERSION'})
@@ -88,7 +88,7 @@ try {
             if($LASTEXITCODE -ne 0){throw "Host build failed: $mode"}
             & "$fixture/PBZ.exe"
             if($LASTEXITCODE -ne 0){throw "Host failed: $mode"}
-            $logs=@(Get-ChildItem "$runtime/PBZModLoader/evidence" -Filter loader.log -Recurse | Sort-Object LastWriteTime -Descending)
+            $logs=@(Get-ChildItem "$runtime/Content/JavaScript/PBZModLoader/evidence" -Filter loader.log -Recurse | Sort-Object LastWriteTime -Descending)
             $lines=Get-Content $logs[0].FullName
             if(@($lines -match 'backend=dll;').Count -ne 1 -or @($lines -match 'entry-restored;').Count -ne 1){throw "Duplicate initialization: $mode"}
             Write-Output "PASS $mode entry protection"

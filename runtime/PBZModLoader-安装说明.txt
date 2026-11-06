@@ -5,7 +5,6 @@ PBZModLoader 1.0.0 正式版安装说明
    无冲突时，将本 MOD 压缩包的内容解压到游戏安装目录。
    例如：游戏装在 D:\Games\PBZ，就解压到 D:\Games\PBZ。
    正确：D:\Games\PBZ\ProjectPBZ
-   错误：D:\Games\PBZ\PBZModLoader\ProjectPBZ（多了一层文件夹）
 3. 确认 version.dll 位于实际游戏进程的 EXE 旁（不是启动器旁）。
    压缩包同时包含 platform\steam\version.dll 和 platform\wegame\version.dll，分别对应 Steam 和 WeGame。
 4. 从原游戏平台启动游戏即可。玩家无需安装 Node.js、npm 或额外编译器。
@@ -16,8 +15,11 @@ WeGame 平台已实测可用，已确认 DLL 自动加载及 MOD 运行。
 更新前请备份自己的配置和 MOD；不要覆盖其他工具的同名 version.dll。
 使用备用入口更新时也不要把包内默认 version.dll 解压到 EXE 旁；只更新已选择的入口 DLL。
 更新加载器时需一并更新 DLL、bootstrap.js、manager.js，保留自己的 mods.ini 配置。
-旧版若使用 ProjectPBZ\Mods\PBZModLoader，请将其中配置、mods 等内容整体迁移到
-ProjectPBZ\PBZModLoader，并同步更新 DLL；mods.ini 中原有相对 Entry 无需修改。
+mods.ini、mods/、evidence/ 与状态日志现在都位于 ProjectPBZ\Content\JavaScript\PBZModLoader。
+从旧版升级时，首次启动会自动把 ProjectPBZ\PBZModLoader 下的数据迁入新目录；
+若新目录已有 mods.ini，旧配置会覆盖它，包内默认配置备份为 mods.ini.before-migration，冲突文件不覆盖。
+旧版若使用 ProjectPBZ\Mods\PBZModLoader 层级，请将该层内的配置、mods 等内容整体上移到
+ProjectPBZ\Content\JavaScript\PBZModLoader，并同步更新 DLL；mods.ini 中原有相对 Entry 无需修改。
 
 备用入口（五选一）
 
@@ -39,11 +41,11 @@ dsound.dll、dxgi.dll；本加载器只需选择其中一个入口安装，不�
 
 安装和管理 MOD
 
-- 将整个 MOD 文件夹放入 ProjectPBZ\PBZModLoader\mods，例如 mods\my-mod\main.js。
+- 将整个 MOD 文件夹放入 ProjectPBZ\Content\JavaScript\PBZModLoader\mods，例如 mods\my-mod\main.js。
   入口只支持 main.js；TypeScript MOD 需先在开发机构建为 main.js。
   文件夹名即 MOD ID，只使用英文字母、数字、下划线或连字符，不要多套一层 dist 目录。
 - 新 MOD 自动发现，无需添加配置。依赖脚本和资源应随 MOD 一起安装。
-- 在 ProjectPBZ\PBZModLoader\mods.ini 的已有 [Mods] 段添加 my-mod=0 可禁用；
+- 在 ProjectPBZ\Content\JavaScript\PBZModLoader\mods.ini 的已有 [Mods] 段添加 my-mod=0 可禁用；
   删除该行或改为 my-mod=1 可恢复。旧 Count / Mod.N 配置仍兼容，[Mods] 开关优先。
 - 更新 MOD 时建议退出游戏，用新版本的整个 MOD 目录替换旧目录，避免遗留脚本。
   从 TS 版换成 JS 版时，直接放入构建后的 main.js；旧的 main.ts 不会被加载。
@@ -51,10 +53,10 @@ dsound.dll、dxgi.dll；本加载器只需选择其中一个入口安装，不�
 
 热重载（Alt+F5）
 
-热重载默认关闭。先在 ProjectPBZ\PBZModLoader\mods.ini 的 [Loader] 段设置 HotReload=1，
+热重载默认关闭。先在 ProjectPBZ\Content\JavaScript\PBZModLoader\mods.ini 的 [Loader] 段设置 HotReload=1，
 重启游戏后再使用 Alt+F5；默认 HotReload=0 时快捷键不会注册。
 
-修改 ProjectPBZ\PBZModLoader\mods 下的 JS 或依赖文件，保存完成后切回游戏按 Alt+F5。
+修改 ProjectPBZ\Content\JavaScript\PBZModLoader\mods 下的 JS 或依赖文件，保存完成后切回游戏按 Alt+F5。
 本地构建的 MOD 需先将新产物复制到上述安装目录。每次重载整组 MOD，包括未修改的 MOD。
 新增、删除 MOD 及 mods.ini 的 [Mods] 开关变化也会生效。
 仅游戏窗口在前台时响应；不监听文件变化，按住快捷键不连发。
@@ -71,15 +73,14 @@ stop 超过 5 秒未完成会保留旧实例并跳过该 MOD（日志 reload blo
 
 3 个 PuerTS 日志钩子只用于把诊断日志写进 loader.log，不是加载 MOD 必需；签名缺失时自动关闭，MOD 仍加载。
 LoggerHooks=1（默认）启用诊断钩子，0 关闭；SafeMode=1 本次运行关闭诊断钩子和热重载，用于排查启动崩溃。
-若 ProjectPBZ\PBZModLoader\loader-initializing.marker 残留，状态日志会写 previous-run=unclean；成功初始化后会删除。
+若 ProjectPBZ\Content\JavaScript\PBZModLoader\loader-initializing.marker 残留，状态日志会写 previous-run=unclean；成功初始化后会删除。
 
 日志和缓存
 
-日志：ProjectPBZ\PBZModLoader\evidence\<本次运行>\loader.log。
-状态摘要：ProjectPBZ\PBZModLoader\loader-status.log（每次启动覆盖，列出入口、MOD 列表、挂钩/诊断/安全模式状态与热重载开关）。
+日志：ProjectPBZ\Content\JavaScript\PBZModLoader\evidence\<本次运行>\loader.log。
+状态摘要：ProjectPBZ\Content\JavaScript\PBZModLoader\loader-status.log（每次启动覆盖，列出入口、MOD 列表、挂钩/诊断/安全模式状态与热重载开关）。
 可查找 failed、reload blocked、reload complete；快捷键无响应时也检查注册失败记录。
-ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-mods（指向 mods 的硬链接视图，硬链接失败时复制）
-与 generated-reloads（热重载版本副本）均为自动缓存，请勿编辑或在游戏运行中删除。
+ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-reloads（热重载版本副本）为自动缓存，请勿编辑或在游戏运行中删除。
 启动时重建/清理，重载版本保留至下次启动。
 长期大量重载会增加磁盘和模块缓存占用，可退出并重新启动游戏。
 
@@ -88,6 +89,7 @@ ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-mods（指向 mods �
 临时停用全部 MOD：将 mods.ini 的 [Loader] 段 Enabled 改为 0，然后重新启动游戏。
 卸载单个 MOD：退出游戏后移除 mods 下对应文件夹，并清理它在配置中的旧条目。
 卸载加载器：退出游戏，备份自己的 MOD 和配置后，删除本加载器安装的那个入口 DLL
-（version.dll、hid.dll、winmm.dll、dsound.dll、dxgi.dll 五选一）、
-ProjectPBZ\PBZModLoader 和 ProjectPBZ\Content\JavaScript\PBZModLoader。
+（version.dll、hid.dll、winmm.dll、dsound.dll、dxgi.dll 五选一），
+以及 ProjectPBZ\Content\JavaScript\PBZModLoader 下的 bootstrap.js、manager.js、mods.ini、
+generated-*、evidence、loader-status.log；保留 mods 文件夹（其中是你的 MOD）。
 仅删除本加载器的文件，不要删除其他工具的 DLL 或游戏原有的 Content\JavaScript 目录。

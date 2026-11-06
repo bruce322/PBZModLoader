@@ -131,8 +131,8 @@ std::string config(const fs::path& root,const std::string& loadPrefix,std::vecto
     }
     return result+"]};\n";
 }
-// PuerTS still reads from its JavaScript search root. Only this disposable cache
-// is replaced; user scripts and configuration live together under ProjectPBZ/PBZModLoader.
+// PuerTS still reads from its JavaScript search root. This disposable cache is
+// only used for hot-reload snapshots; startup config loads MODs in place.
 void syncMods(const fs::path& root,const fs::path& scripts,bool snapshot=false) {
     const auto source=root/L"mods", cache=scripts/L"generated-mods";
     // Reject reparse points so neither hardlinking, copying nor cleanup follows a junction.
@@ -163,6 +163,88 @@ void syncMods(const fs::path& root,const fs::path& scripts,bool snapshot=false) 
         if(!snapshot) copied=true;
     }
     if(copied) log("hard links unavailable for some MOD files; copied fallback used");
+}
+void resetGenerated(const fs::path& scripts) {
+    auto cache=scripts/L"generated-mods";
+    auto reject=[](const fs::path& path) {
+        auto attributes=GetFileAttributesW(path.c_str());
+        if(attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT))
+            throw std::runtime_error("Generated cache must not contain reparse points");
+    };
+    reject(cache);
+    if(fs::exists(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) reject(item.path());
+    fs::remove_all(cache);
+}
+
+inline void mergeLegacyDirectory(const fs::path& source,const fs::path& destination) {
+    if(!fs::exists(source)) return;
+    fs::create_directories(destination);
+    std::vector<fs::path> items;
+    for(const auto& item:fs::directory_iterator(source)) items.push_back(item.path());
+    for(const auto& path:items) {
+        auto target=destination/path.filename();
+        if(!fs::exists(target)) { fs::rename(path,target); continue; }
+        if(fs::is_directory(path) && fs::is_directory(target)) {
+            mergeLegacyDirectory(path,target);
+        } else {
+            log("legacy migration conflict: kept "+utf8(target.wstring())+"; left "+utf8(path.wstring()));
+        }
+    }
+    std::error_code error;
+    if(fs::is_empty(source,error) && !error) fs::remove(source,error);
+}
+
+inline void moveLegacyFile(const fs::path& source,const fs::path& destination) {
+    if(!fs::exists(source)) return;
+    if(fs::exists(destination)) {
+        log("legacy migration conflict: kept "+utf8(destination.wstring())+"; left "+utf8(source.wstring()));
+        return;
+    }
+    fs::create_directories(destination.parent_path());
+    fs::rename(source,destination);
+}
+
+void migrateLegacy(const fs::path& legacy,const fs::path& root) {
+    if(!fs::is_directory(legacy)) return;
+    auto reject=[](const fs::path& path) {
+        auto attributes=GetFileAttributesW(path.c_str());
+        if(attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT))
+            throw std::runtime_error("Legacy data must not contain reparse points");
+    };
+    reject(legacy);
+    for(const auto& item:fs::recursive_directory_iterator(legacy)) reject(item.path());
+    log("legacy data directory found: "+utf8(legacy.wstring())+"; migrating");
+    fs::create_directories(root);
+    const auto legacyIni=legacy/L"mods.ini", targetIni=root/L"mods.ini";
+    if(fs::is_regular_file(legacyIni)) {
+        if(fs::exists(targetIni)) {
+            fs::copy_file(targetIni,root/L"mods.ini.before-migration",fs::copy_options::overwrite_existing);
+            fs::copy_file(legacyIni,targetIni,fs::copy_options::overwrite_existing);
+            fs::remove(legacyIni);
+            log("legacy mods.ini migrated over packaged default; previous default saved as mods.ini.before-migration");
+        } else {
+            fs::rename(legacyIni,targetIni);
+            log("legacy mods.ini migrated");
+        }
+    }
+    moveLegacyFile(legacy/L"loader-status.log",root/L"loader-status.log");
+    moveLegacyFile(legacy/L"loader-initializing.marker",root/L"loader-initializing.marker");
+    mergeLegacyDirectory(legacy/L"mods",root/L"mods");
+    mergeLegacyDirectory(legacy/L"evidence",root/L"evidence");
+    for(const wchar_t* name : {L"generated-mods",L"generated-reloads",L"generated-config.js"}) {
+        auto cache=legacy/name;
+        if(fs::exists(cache)) { fs::remove_all(cache); log("legacy cache removed: "+utf8(cache.wstring())); }
+    }
+    std::vector<fs::path> remaining;
+    for(const auto& item:fs::directory_iterator(legacy)) remaining.push_back(item.path());
+    for(const auto& path:remaining) {
+        auto name=path.filename().wstring();
+        if(name==L"mods" || name==L"evidence" || name==L"mods.ini" || name==L"loader-status.log" || name==L"loader-initializing.marker") continue;
+        moveLegacyFile(path,root/name);
+    }
+    std::error_code error;
+    if(fs::is_empty(legacy,error) && !error) { fs::remove(legacy,error); log("legacy data directory removed"); }
+    else log("legacy data directory retained; inspect remaining files: "+utf8(legacy.wstring()));
 }
 
 void resetReloads(const fs::path& scripts) {

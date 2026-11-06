@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9-]+)?$') { throw 'Invalid release version' }
 $files=@(
     'PBZModLoader-安装说明.txt',
-    'ProjectPBZ/PBZModLoader/mods.ini',
+    'ProjectPBZ/Content/JavaScript/PBZModLoader/mods.ini',
     'ProjectPBZ/Content/JavaScript/PBZModLoader/bootstrap.js',
     'ProjectPBZ/Content/JavaScript/PBZModLoader/manager.js'
 )
@@ -36,7 +36,7 @@ foreach($proxy in @('hid','winmm','dsound','dxgi')) {
     Copy-Item -LiteralPath "$PSScriptRoot/build/$proxy.dll" -Destination $destination
     $files += $relative
 }
-$directories=@('ProjectPBZ/PBZModLoader/mods/')
+$directories=@('ProjectPBZ/Content/JavaScript/PBZModLoader/mods/')
 foreach ($relative in $directories) {
     New-Item -ItemType Directory -Force (Join-Path $release $relative) | Out-Null
 }

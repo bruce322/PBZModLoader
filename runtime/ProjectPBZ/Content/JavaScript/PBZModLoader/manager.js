@@ -1,7 +1,7 @@
 'use strict';
 // CommonJS, deliberately independent of Node APIs: runs in the game's PuerTS VM.
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
-const ENTRY = /^(?:\.\/generated-mods\/|\.\/generated-reloads\/[0-9]+\/generated-mods\/)(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.js$/;
+const ENTRY = /^(?:\.\/mods\/|\.\/generated-reloads\/[0-9]+\/generated-mods\/)(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.js$/;
 function validate(config) {
     if (!config || config.version !== 1 || !Array.isArray(config.mods) || config.mods.length > 128) {
         throw new Error('Unsupported MOD configuration');

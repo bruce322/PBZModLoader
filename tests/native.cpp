@@ -158,7 +158,7 @@ int main() {
         { std::ofstream f(temp/L"mods.ini"); f<<content; }
         // Invalidate Windows INI cache between fixture writes.
         WritePrivateProfileStringW(nullptr,nullptr,nullptr,(temp/L"mods.ini").c_str());
-        bool accepted=false; try { config(temp,"./generated-mods/"); accepted=true; } catch(const std::exception&) {}
+        bool accepted=false; try { config(temp,"./mods/"); accepted=true; } catch(const std::exception&) {}
         assert(accepted==expected);
     };
     const std::string prefix="[Loader]\nVersion=1\nCount=1\n[Mod.0]\nId=a\n";
@@ -183,9 +183,9 @@ int main() {
     iniTest(prefix+"Enabled=2\nEntry=mods/a/main.js\n",false);
     // Legacy configs (no Version key, or a [Mod.N] section without Enabled) remain loadable.
     iniTest("[Loader]\nCount=1\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n",true);
-    assert(config(temp,"./generated-mods/").find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
+    assert(config(temp,"./mods/").find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
     iniTest("[Loader]\nVersion=1\nCount=1\n[Mod.0]\nId=a\nEntry=mods/a/main.js\n",true);
-    assert(config(temp,"./generated-mods/").find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
+    assert(config(temp,"./mods/").find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
     iniTest("[Loader]\nVersion=2\nCount=1\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n",false);
     iniTest("[Loader]\nVersion=1\nCount=2\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n[Mod.1]\nId=a\nEnabled=0\nEntry=mods/a/main.js\n",false);
     // Windows is case-insensitive for the same MOD directory; reject A/a to avoid silent collisions.
@@ -195,43 +195,43 @@ int main() {
         const char bom[]="\xEF\xBB\xBF[Loader]\nVersion=1\nCount=1\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n";
         f.write(bom,sizeof(bom)-1); f.close();
         WritePrivateProfileStringW(nullptr,nullptr,nullptr,(temp/L"mods.ini").c_str());
-        bool rejected=false; try { config(temp,"./generated-mods/"); } catch(const std::exception&) { rejected=true; }
+        bool rejected=false; try { config(temp,"./mods/"); } catch(const std::exception&) { rejected=true; }
         assert(rejected);
         std::cout<<"PASS config rejects UTF-8 BOM\n";
     }
     const std::string automatic="[Loader]\nVersion=1\n";
     iniTest(automatic,true);
-    assert(config(temp,"./generated-mods/").find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
+    assert(config(temp,"./mods/").find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
     fs::create_directories(temp/L"mods/z");
     fs::create_directories(temp/L"mods/helper/nested");
     { std::ofstream f(temp/L"mods/z/main.js"); f<<"module.exports={};"; }
     { std::ofstream f(temp/L"mods/helper/nested/main.js"); f<<"module.exports={};"; }
     { std::ofstream f(temp/L"mods/loose.js"); f<<"module.exports={};"; }
-    auto generated=config(temp,"./generated-mods/");
-    assert(generated.find("\"entry\":\"./generated-mods/a/main.js\"")!=std::string::npos);
+    auto generated=config(temp,"./mods/");
+    assert(generated.find("\"entry\":\"./mods/a/main.js\"")!=std::string::npos);
     assert(generated.find("\"id\":\"a\"")<generated.find("\"id\":\"z\""));
     assert(generated.find("helper")==std::string::npos && generated.find("loose")==std::string::npos);
     iniTest(automatic+"[Mods]\na=0\nz=1\nabsent=0\n",true);
-    assert(config(temp,"./generated-mods/").find("\"id\":\"a\",\"enabled\":false")!=std::string::npos);
+    assert(config(temp,"./mods/").find("\"id\":\"a\",\"enabled\":false")!=std::string::npos);
     iniTest(automatic+"[Mods]\na=2\n",false);
     iniTest(prefix+"Enabled=0\nEntry=mods/a/main.js\n",true);
-    generated=config(temp,"./generated-mods/");
+    generated=config(temp,"./mods/");
     assert(generated.find("\"id\":\"a\",\"enabled\":false")!=std::string::npos);
     assert(generated.find("\"id\":\"a\"",generated.find("\"id\":\"a\"")+1)==std::string::npos);
     assert(generated.find("\"id\":\"z\"")!=std::string::npos);
     iniTest("[Loader]\nVersion=1\nCount=1\n[Mod.0]\nId=alias\nEnabled=0\nEntry=mods/a/main.js\n",true);
-    assert(config(temp,"./generated-mods/").find("\"id\":\"a\"")==std::string::npos);
+    assert(config(temp,"./mods/").find("\"id\":\"a\"")==std::string::npos);
     iniTest(prefix+"Enabled=1\nEntry=mods/a/main.js\n[Mods]\na=0\n",true);
-    assert(config(temp,"./generated-mods/").find("\"id\":\"a\",\"enabled\":false")!=std::string::npos);
+    assert(config(temp,"./mods/").find("\"id\":\"a\",\"enabled\":false")!=std::string::npos);
     fs::remove(temp/L"mods/z/main.js");
-    assert(config(temp,"./generated-mods/").find("\"id\":\"z\"")==std::string::npos);
+    assert(config(temp,"./mods/").find("\"id\":\"z\"")==std::string::npos);
     // TypeScript-only directories are ignored; explicit .ts entries are rejected.
     { std::ofstream f(temp/L"mods/tsonly/main.ts"); f<<"export const value: number = 1;"; }
-    generated=config(temp,"./generated-mods/");
+    generated=config(temp,"./mods/");
     assert(generated.find("tsonly")==std::string::npos);
     { std::ofstream f(temp/L"mods.ini"); f<<prefix<<"Enabled=1\nEntry=mods/a/main.ts\n"; }
     bool tsRejected=false;
-    try { config(temp,"./generated-mods/"); } catch(const std::exception& e) { tsRejected=std::string(e.what()).find("TypeScript")!=std::string::npos; }
+    try { config(temp,"./mods/"); } catch(const std::exception& e) { tsRejected=std::string(e.what()).find("TypeScript")!=std::string::npos; }
     assert(tsRejected);
     std::cout<<"PASS config ignores TypeScript-only mods and rejects .ts entries\n";
     iniTest(automatic,true);
@@ -260,18 +260,38 @@ int main() {
     publishReload(temp,temp/L"scripts",4);
     assert(fs::exists(temp/L"scripts/generated-reloads/4/config.js"));
     std::cout<<"PASS hot reload immutable dependencies, preparation failure and recovery\n";
+    {
+        auto migration=temp/L"migration";
+        auto legacy=migration/L"ProjectPBZ/PBZModLoader";
+        auto moved=migration/L"ProjectPBZ/Content/JavaScript/PBZModLoader";
+        fs::create_directories(legacy/L"mods/old");
+        fs::create_directories(moved);
+        { std::ofstream f(legacy/L"mods.ini"); f<<"[Loader]\nVersion=1\n"; }
+        { std::ofstream f(moved/L"mods.ini"); f<<"[Loader]\nVersion=1\n"; }
+        { std::ofstream f(legacy/L"mods/old/main.js"); f<<"module.exports={};"; }
+        migrateLegacy(legacy,moved);
+        assert(!fs::exists(legacy));
+        assert(fs::is_regular_file(moved/L"mods.ini.before-migration"));
+        assert(fs::is_regular_file(moved/L"mods/old/main.js"));
+        assert(config(moved,"./mods/").find("\"entry\":\"./mods/old/main.js\"")!=std::string::npos);
+        std::cout<<"PASS legacy PBZModLoader data migration\n";
+    }
     fs::remove_all(temp/L"mods");
     iniTest(automatic,true);
-    assert(config(temp,"./generated-mods/").find("\"mods\":[]")!=std::string::npos);
+    assert(config(temp,"./mods/").find("\"mods\":[]")!=std::string::npos);
     fs::remove_all(temp);
     auto layout=fs::temp_directory_path()/(L"pbz-layout-test-"+std::to_wstring(GetCurrentProcessId()));
     fs::create_directories(layout/L"ProjectPBZ/Content/JavaScript/PBZModLoader");
-    fs::create_directories(layout/L"ProjectPBZ/PBZModLoader");
-    { std::ofstream f(layout/L"ProjectPBZ/PBZModLoader/mods.ini"); f<<"fixture"; }
+    fs::create_directories(layout/L"ProjectPBZ/Content/JavaScript/PBZModLoader");
+    { std::ofstream f(layout/L"ProjectPBZ/Content/JavaScript/PBZModLoader/mods.ini"); f<<"fixture"; }
     { std::ofstream f(layout/L"ProjectPBZ/Content/JavaScript/PBZModLoader/bootstrap.js"); f<<"fixture"; }
     for(const auto& relative:{L"platform/steam/PBZ.exe",L"platform/wegame/PBZ.exe",L"ProjectPBZ/Binaries/Win64/PBZ.exe",L"PBZ.exe"})
         assert(findProject(layout/relative)==fs::canonical(layout/L"ProjectPBZ"));
-    fs::remove(layout/L"ProjectPBZ/PBZModLoader/mods.ini");
+    fs::remove(layout/L"ProjectPBZ/Content/JavaScript/PBZModLoader/mods.ini");
+    fs::create_directories(layout/L"ProjectPBZ/PBZModLoader");
+    { std::ofstream f(layout/L"ProjectPBZ/PBZModLoader/mods.ini"); f<<"legacy"; }
+    assert(findProject(layout/L"platform/wegame/PBZ.exe")==fs::canonical(layout/L"ProjectPBZ"));
+    fs::remove_all(layout/L"ProjectPBZ/PBZModLoader");
     bool missing=false; try { findProject(layout/L"platform/wegame/PBZ.exe"); } catch(const std::exception&) { missing=true; } assert(missing);
     fs::remove_all(layout);
     std::cout<<"PASS platform-independent project discovery and missing runtime rejection\n";

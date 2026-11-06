@@ -170,7 +170,7 @@ extern "C" void pbz_initialize() noexcept {
         wchar_t exe[32768]; check(GetModuleFileNameW(nullptr,exe,32768)>0,"game path");
         game=exe;
         const fs::path project=findProject(game);
-        root=project/L"PBZModLoader", scripts=project/L"Content/JavaScript/PBZModLoader";
+        root=project/L"Content/JavaScript/PBZModLoader", scripts=root;
         SYSTEMTIME st; GetLocalTime(&st); wchar_t name[80];
         swprintf(name,80,L"%04u%02u%02u-%02u%02u%02u-%lu-dll",st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond,GetCurrentProcessId());
         evidence=root/L"evidence"/name; fs::create_directories(evidence);
@@ -185,6 +185,11 @@ extern "C" void pbz_initialize() noexcept {
         wchar_t system[32768]; check(GetModuleFileNameW(realVersion,system,32768)>0,"system version path");
         log("proxy-system="+utf8(system));
         log("project="+utf8(project.wstring()));
+        const fs::path legacy=project/L"PBZModLoader";
+        if(legacy!=root) {
+            try { migrateLegacy(legacy,root); }
+            catch(const std::exception& e) { log(std::string("legacy migration failed: ")+e.what()+"; original files kept"); }
+        }
         auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
         auto hotReload=ini(root/L"mods.ini",L"Loader",L"HotReload");
         auto loggerHooks=ini(root/L"mods.ini",L"Loader",L"LoggerHooks");
@@ -218,8 +223,8 @@ extern "C" void pbz_initialize() noexcept {
         for(auto file:{L"bootstrap.js",L"manager.js"}) if(!fs::is_regular_file(scripts/file)) throw std::runtime_error("Missing loader JS");
         resetReloads(scripts);
         reloadRoot=root; reloadScripts=scripts;
-        syncMods(root,scripts);
-        auto generated=config(root,"./generated-mods/",&mods);
+        resetGenerated(scripts);
+        auto generated=config(root,"./mods/",&mods);
         if(generated.size()>256*1024) throw std::runtime_error("Generated config exceeds 256 KiB");
         auto temporary=scripts/(L"generated-config."+std::to_wstring(GetCurrentProcessId())+L".tmp");
         { std::ofstream f(temporary,std::ios::binary); f<<generated; f.close(); check(bool(f),"write config"); }
