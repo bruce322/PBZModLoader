@@ -143,7 +143,7 @@ PBZCombatAsset、Game、HuaShira、其他目录排序，只处理有登记表依
   "archive": "build/type-batches/checkpoints",
   "reflectionRoot": "build/reflection",
   "log": "D:/game/ProjectPBZ/Content/JavaScript/PBZModLoader/evidence/<run>/loader.log",
-  "commandDir": "D:/game/ProjectPBZ/Content/JavaScript/PBZModLoader/generated-mods/load-types-dev/commands"
+  "commandDir": "D:/game/ProjectPBZ/Content/JavaScript/PBZModLoader/mods/load-types-dev/commands"
 }
 ```
 
@@ -163,7 +163,7 @@ SDK 合并使用原有两次采集和检查点指向的有效 `reflection.json`�
 ## 属性映射定向验证
 
 `tests/property-mapping-probe.js` 是命令门控的临时 MOD。启动并通过 `PBZ-Windowed.ps1 -Status`
-后，才向其 generated-mods 目录写入 `command.js`，导出 `{targets:[{owner,member,kind,typeKind}]}`。
+后，才向其 MOD 目录（`mods/<ID>/`）写入 `command.js`，导出 `{targets:[{owner,member,kind,typeKind}]}`。
 目标由旧版 `generation-report.json` 的 `unresolvedProperties` 与 `type-index.json` 的类型种类生成。
 探针检查全部目标的 getter/setter、读取可取得的类默认对象或临时结构体；不会写类默认对象。
 可选 `write` 只用于已核对存储类型的临时结构字段，不批量向不同 FieldPath 子类型写同一路径。

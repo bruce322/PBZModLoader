@@ -26,6 +26,20 @@ PBZModLoader 是《影之刃零》（Phantom Blade Zero）的 MOD 加载器，�
 
 本仓库包含加载器源码、运行文件模板、SDK 和开发工具。玩家请从上方发布页面获取安装包；本地构建的玩家运行包位于 `releases/`，游戏安装目录只需保留运行文件。
 
+## 1.0.2：数据目录迁移
+
+运行时数据（`mods.ini`、`mods/`、`evidence/`、状态日志）统一迁入
+`ProjectPBZ/Content/JavaScript/PBZModLoader`。首次启动自动迁移旧
+`ProjectPBZ/PBZModLoader`：旧配置覆盖包内默认并备份为
+`mods.ini.before-migration`，目录冲突保留，旧缓存删除；旧目录为空后才删除。
+启动不再复制 MOD 正文，热重载仍生成 revision 副本。
+
+## 1.0.1：仅 JS 运行时与诊断改进
+
+移除运行期 TypeScript 编译和随包编译器；加载器只发现并加载 `main.js`，
+TS 在开发机构建。PuerTS 日志钩子改为可选（签名缺失时自动关闭），新增
+`SafeMode`、`LoggerHooks`、启动 marker 和 `loader-status.log` 摘要。
+
 ## 1.0.0：首个正式发布版
 
 将原 0.3.7-preview 的打包内容作为 1.0.0 正式发布，后续发布不再默认使用 preview 后缀。

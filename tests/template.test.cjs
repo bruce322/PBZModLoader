@@ -54,8 +54,8 @@ test('TS template compiles and works with the current CommonJS manager', async t
                 throw new Error('Unexpected runtime dependency: ' + name);
             }
         });
-        const result = load({ version: 1, mods: [{ id: 'my-mod', enabled: true, entry: 'mods/my-mod/main.js' }] }, entry => {
-            assert.equal(entry, './generated-mods/my-mod/main.js');
+        const result = load({ version: 1, mods: [{ id: 'my-mod', enabled: true, entry: './mods/my-mod/main.js' }] }, entry => {
+            assert.equal(entry, './mods/my-mod/main.js');
             vm.runInContext(source, context);
             return exports;
         }, line => logs.push(line));

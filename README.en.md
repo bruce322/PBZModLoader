@@ -26,6 +26,24 @@ Install Node.js and npm on your development machine, then run `npm ci`, `npm run
 
 This repository contains loader source code, runtime file templates, the SDK, and development tools. Players should download an installation package from the release page above. Locally built player packages are placed in `releases/`; only runtime files belong in the game installation directory.
 
+## 1.0.2: Data directory migration
+
+Runtime data (`mods.ini`, `mods/`, `evidence/`, and status logs) now lives under
+`ProjectPBZ/Content/JavaScript/PBZModLoader`. On the first launch the loader
+migrates an older `ProjectPBZ/PBZModLoader`: the legacy configuration replaces
+the packaged default (which is saved as `mods.ini.before-migration`), conflicting
+files are kept, old caches are removed, and the old directory is deleted only
+when empty. Startup no longer copies MOD bodies; hot reload still creates
+per-revision copies.
+
+## 1.0.1: JS-only runtime and diagnostics
+
+Removed the in-process TypeScript compiler and bundled compiler. The loader
+discovers and loads only `main.js`; build TS mods on the development machine.
+PuerTS log hooks are now optional (automatically disabled when signatures are
+missing), with `SafeMode`, `LoggerHooks`, a startup marker, and the
+`loader-status.log` summary.
+
 ## 1.0.0: First stable release
 
 The former 0.3.7-preview package is now released as stable version 1.0.0. Future releases will no longer use the preview suffix by default.

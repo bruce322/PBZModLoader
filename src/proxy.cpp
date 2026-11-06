@@ -74,7 +74,7 @@ static void writeStatus(const fs::path& root,const fs::path& game,const fs::path
     try {
         std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::trunc);
         if(!f) return;
-        f<<"PBZModLoader 1.0.0 (JS only)\r\n";
+        f<<"PBZModLoader 1.0.2 (JS only)\r\n";
         f<<"status="<<status<<"\r\n";
         if(!game.empty()) {
             f<<"game="<<utf8(game.wstring())<<"\r\n";
