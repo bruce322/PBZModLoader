@@ -91,7 +91,9 @@ void compileTs(const fs::path& root,const fs::path& scripts,const std::string& e
 }
 std::string config(const fs::path& root,const fs::path& scripts={},bool strict=false) {
     fs::path p=root/L"mods.ini"; if(!fs::is_regular_file(p)) throw std::runtime_error("Missing mods.ini");
-    if(ini(p,L"Loader",L"Version")!=L"1") throw std::runtime_error("Unsupported config version");
+    // Missing Version is a legacy config (pre-versioned mods.ini); only an explicit mismatch is fatal.
+    auto version=ini(p,L"Loader",L"Version");
+    if(!version.empty() && version!=L"1") throw std::runtime_error("Unsupported config version");
     auto countValue=ini(p,L"Loader",L"Count");
     int count=countValue.empty()?0:number(countValue,128); std::set<std::string> ids;
     struct Mod { std::string id,entry; bool enabled; };
@@ -100,7 +102,8 @@ std::string config(const fs::path& root,const fs::path& scripts={},bool strict=f
     for(int i=0;i<count;++i) {
         auto section=L"Mod."+std::to_wstring(i);
         auto id=utf8(ini(p,section,L"Id")), entry=utf8(ini(p,section,L"Entry"));
-        auto enabled=number(ini(p,section,L"Enabled"),1);
+        auto enabledValue=ini(p,section,L"Enabled");
+        auto enabled=enabledValue.empty()?1:number(enabledValue,1);
         if(!std::regex_match(id,std::regex("[A-Za-z0-9_-]+")) || !ids.insert(id).second ||
            !std::regex_match(entry,std::regex("mods/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.(js|ts)"))) throw std::runtime_error("Invalid or duplicate MOD: "+id);
         auto overrideValue=ini(p,L"Mods",fs::u8path(id).wstring().c_str());

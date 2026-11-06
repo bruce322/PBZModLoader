@@ -70,6 +70,10 @@ int main() {
             std::wstring value=denied; auto rejected=string(value);
             assert(!trustedModBytes(root,&rejected,&bytes));
         }
+        // A validator path may contain an unrelated PBZModLoader segment before the real tree.
+        std::wstring prefixed=L"../../../PBZModLoader/ProjectPBZ/Content/JavaScript/PBZModLoader/generated-mods/test/main.js";
+        auto prefixedPath=string(prefixed);
+        assert(trustedModBytes(root,&prefixedPath,&bytes));
         assert(!trustedModBytes(root,nullptr,&bytes));
         source.count=0; assert(!trustedModText(root,&name,&source));
         std::cout<<"PASS MOD validation: exact bytes, UTF-8, CommonJS wrapper, game paths, traversal and content mismatch\n";
@@ -102,6 +106,12 @@ int main() {
     iniTest(prefix+"Enabled=1\nEntry=../escape.js\n",false);
     iniTest(prefix+"Enabled=1\nEntry=mods/a/main.ts\n",false);
     iniTest(prefix+"Enabled=2\nEntry=mods/a/main.js\n",false);
+    // Legacy configs (no Version key, or a [Mod.N] section without Enabled) remain loadable.
+    iniTest("[Loader]\nCount=1\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n",true);
+    assert(config(temp).find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
+    iniTest("[Loader]\nVersion=1\nCount=1\n[Mod.0]\nId=a\nEntry=mods/a/main.js\n",true);
+    assert(config(temp).find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);
+    iniTest("[Loader]\nVersion=2\nCount=1\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n",false);
     iniTest("[Loader]\nVersion=1\nCount=2\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n[Mod.1]\nId=a\nEnabled=0\nEntry=mods/a/main.js\n",false);
     const std::string automatic="[Loader]\nVersion=1\n";
     iniTest(automatic,true);

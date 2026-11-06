@@ -14,21 +14,40 @@ fs::path modScriptPath(const fs::path& root,std::wstring name) {
     std::wstring lower=name;
     for(auto& c:lower) if(c>=L'A' && c<=L'Z') c+=L'a'-L'A';
     const std::wstring marker=L"pbzmodloader/";
-    auto pos=lower.find(marker);
-    if(pos==std::wstring::npos || (pos && lower[pos-1]!=L'/')) return {};
-    auto suffix=name.substr(pos+marker.size());
-    if(suffix.empty() || suffix.find_first_of(L":\0",0,2)!=std::wstring::npos) return {};
-    fs::path relative(suffix);
-    if(relative.is_absolute() || relative.has_root_path()) return {};
-    for(const auto& part:relative) if(part==L".." || part==L"." || part.empty()) return {};
-    auto normalized=relative.generic_wstring();
-    if(normalized!=L"bootstrap.js" && normalized!=L"manager.js" && normalized!=L"generated-config.js" &&
-       normalized.rfind(L"generated-mods/",0)!=0 && normalized.rfind(L"generated-reloads/",0)!=0) return {};
-    auto canonicalRoot=fs::canonical(root),candidate=fs::canonical(root/relative);
-    auto within=candidate.lexically_relative(canonicalRoot);
-    if(within.empty() || within.is_absolute()) return {};
-    for(const auto& part:within) if(part==L"..") return {};
-    return candidate;
+    fs::path canonicalRoot; bool haveRoot=false;
+    // A validator path may contain an unrelated PBZModLoader segment before the real loader tree.
+    // Try every marker occurrence from the end; accept only a suffix that resolves inside root.
+    for(size_t at=lower.size();;) {
+        auto pos=lower.rfind(marker,at?at-1:0);
+        if(pos==std::wstring::npos) break;
+        if(pos==0 || lower[pos-1]==L'/') {
+            auto suffix=name.substr(pos+marker.size());
+            if(!suffix.empty() && suffix.find_first_of(L":\0",0,2)==std::wstring::npos) {
+                fs::path relative(suffix);
+                bool invalid=relative.is_absolute() || relative.has_root_path();
+                if(!invalid) for(const auto& part:relative) {
+                    if(part==L".." || part==L"." || part.empty()) { invalid=true; break; }
+                }
+                if(!invalid) {
+                    auto normalized=relative.generic_wstring();
+                    if(normalized==L"bootstrap.js" || normalized==L"manager.js" || normalized==L"generated-config.js" ||
+                       normalized.rfind(L"generated-mods/",0)==0 || normalized.rfind(L"generated-reloads/",0)==0) {
+                        try {
+                            if(!haveRoot) { canonicalRoot=fs::canonical(root); haveRoot=true; }
+                            auto candidate=fs::canonical(root/relative);
+                            auto within=candidate.lexically_relative(canonicalRoot);
+                            bool escaped=within.empty() || within.is_absolute();
+                            if(!escaped) for(const auto& part:within) if(part==L"..") { escaped=true; break; }
+                            if(!escaped) return candidate;
+                        } catch(const std::exception&) {}
+                    }
+                }
+            }
+        }
+        if(pos==0) break;
+        at=pos;
+    }
+    return {};
 }
 bool readModScript(const fs::path& root,const GameString* path,Bytes& bytes) {
     std::wstring name;
