@@ -171,6 +171,15 @@ int main() {
     iniTest("[Loader]\nVersion=1\nCount=2\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n[Mod.1]\nId=a\nEnabled=0\nEntry=mods/a/main.js\n",false);
     // Windows is case-insensitive for the same MOD directory; reject A/a to avoid silent collisions.
     iniTest("[Loader]\nVersion=1\nCount=2\n[Mod.0]\nId=A\nEnabled=1\nEntry=mods/A/main.js\n[Mod.1]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n",false);
+    {
+        std::ofstream f(temp/L"mods.ini",std::ios::binary);
+        const char bom[]="\xEF\xBB\xBF[Loader]\nVersion=1\nCount=1\n[Mod.0]\nId=a\nEnabled=1\nEntry=mods/a/main.js\n";
+        f.write(bom,sizeof(bom)-1); f.close();
+        WritePrivateProfileStringW(nullptr,nullptr,nullptr,(temp/L"mods.ini").c_str());
+        bool rejected=false; try { config(temp); } catch(const std::exception&) { rejected=true; }
+        assert(rejected);
+        std::cout<<"PASS config rejects UTF-8 BOM\n";
+    }
     const std::string automatic="[Loader]\nVersion=1\n";
     iniTest(automatic,true);
     assert(config(temp).find("\"id\":\"a\",\"enabled\":true")!=std::string::npos);

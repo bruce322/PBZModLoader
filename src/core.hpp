@@ -95,6 +95,9 @@ void compileTs(const fs::path& root,const fs::path& scripts,const std::string& e
 }
 std::string config(const fs::path& root,const fs::path& scripts={},bool strict=false) {
     fs::path p=root/L"mods.ini"; if(!fs::is_regular_file(p)) throw std::runtime_error("Missing mods.ini");
+    // Windows profile APIs treat the BOM as part of the first section name. Reject
+    // instead of silently treating a partially parsed file as a legacy config.
+    if(utf8Bom(p)) throw std::runtime_error("mods.ini has a UTF-8 BOM; save as UTF-8 without BOM or ANSI");
     // Missing Version is a legacy config (pre-versioned mods.ini); only an explicit mismatch is fatal.
     auto version=ini(p,L"Loader",L"Version");
     if(!version.empty() && version!=L"1") throw std::runtime_error("Unsupported config version");
