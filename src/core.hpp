@@ -62,7 +62,10 @@ int number(const std::wstring& s,int max) {
     if(s.empty() || s.find_first_not_of(L"0123456789")!=std::wstring::npos) throw std::runtime_error("Invalid numeric config");
     auto n=std::stoul(s); if(n>(unsigned)max) throw std::runtime_error("Config number out of range"); return (int)n;
 }
-std::string config(const fs::path& root) {
+struct ModInfo { std::string id,entry; bool enabled; };
+std::string config(const fs::path& root,const std::string& loadPrefix,std::vector<ModInfo>* out=nullptr) {
+    std::string prefix=loadPrefix;
+    if(!prefix.empty() && prefix.back()!='/') prefix+='/';
     fs::path p=root/L"mods.ini"; if(!fs::is_regular_file(p)) throw std::runtime_error("Missing mods.ini");
     // Windows profile APIs treat the BOM as part of the first section name. Reject
     // instead of silently treating a partially parsed file as a legacy config.
@@ -83,7 +86,7 @@ std::string config(const fs::path& root) {
         auto enabled=enabledValue.empty()?1:number(enabledValue,1);
         bool duplicate=false;
         for(const auto& seen:ids) if(_stricmp(seen.c_str(),id.c_str())==0) { duplicate=true; break; }
-        if(!std::regex_match(id,std::regex("[A-Za-z0-9_-]+")) || duplicate ||
+        if(entry.size()>512 || !std::regex_match(id,std::regex("[A-Za-z0-9_-]{1,64}")) || duplicate ||
            !std::regex_match(entry,std::regex("mods/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.js"))) throw std::runtime_error("Invalid or duplicate MOD: "+id);
         ids.push_back(id);
         auto overrideValue=ini(p,L"Mods",fs::u8path(id).wstring().c_str());
@@ -95,7 +98,7 @@ std::string config(const fs::path& root) {
     std::map<std::string,std::string> discovered;
     if(fs::is_directory(root/L"mods")) for(const auto& item:fs::directory_iterator(root/L"mods")) {
         auto id=utf8(item.path().filename().wstring());
-        if(!item.is_directory() || !std::regex_match(id,std::regex("[A-Za-z0-9_-]+")) ||
+        if(!item.is_directory() || !std::regex_match(id,std::regex("[A-Za-z0-9_-]{1,64}")) ||
            !fs::is_regular_file(item.path()/L"main.js")) continue;
         auto entry="mods/"+id+"/main.js";
         bool configured=false;
@@ -111,21 +114,27 @@ std::string config(const fs::path& root) {
     for(size_t i=0;i<mods.size();++i) {
         const auto& mod=mods[i];
         const auto& id=mod.id; auto entry=mod.entry; bool enabled=mod.enabled;
+        auto published=prefix+entry.substr(5);
+        if(published.size()>512) throw std::runtime_error("MOD entry path too long: "+id);
         if(enabled) {
             auto file=fs::weakly_canonical(root/fs::u8path(entry));
             auto relative=file.lexically_relative(fs::canonical(root/L"mods"));
             if(relative.empty() || *relative.begin()==L".." || !fs::is_regular_file(file)) throw std::runtime_error("Missing or escaped entry: "+entry);
         }
         if(i) result+=",";
-        result+="{\"id\":\""+id+"\",\"enabled\":"+(enabled?"true":"false")+",\"entry\":\""+entry+"\"}";
+        result+="{\"id\":\""+id+"\",\"enabled\":"+(enabled?"true":"false")+",\"entry\":\""+published+"\"}";
+    }
+    if(out) {
+        out->clear();
+        for(const auto& mod:mods) out->push_back({mod.id,mod.entry,mod.enabled});
     }
     return result+"]};\n";
 }
 // PuerTS still reads from its JavaScript search root. Only this disposable cache
 // is replaced; user scripts and configuration live together under ProjectPBZ/PBZModLoader.
-void syncMods(const fs::path& root,const fs::path& scripts) {
+void syncMods(const fs::path& root,const fs::path& scripts,bool snapshot=false) {
     const auto source=root/L"mods", cache=scripts/L"generated-mods";
-    // Reject reparse points so neither copying nor cleanup follows a junction.
+    // Reject reparse points so neither hardlinking, copying nor cleanup follows a junction.
     auto rejectLink=[](const fs::path& path) {
         auto attributes=GetFileAttributesW(path.c_str());
         if(attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT))
@@ -134,9 +143,25 @@ void syncMods(const fs::path& root,const fs::path& scripts) {
     rejectLink(source); rejectLink(cache);
     if(fs::exists(source)) for(const auto& item:fs::recursive_directory_iterator(source)) rejectLink(item.path());
     if(fs::exists(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) rejectLink(item.path());
-    fs::remove_all(cache);
-    if(fs::exists(source)) fs::copy(source,cache,fs::copy_options::recursive);
-    else fs::create_directories(cache);
+    fs::remove_all(cache); fs::create_directories(cache);
+    if(!fs::exists(source)) return;
+    // Hard links keep the JavaScript search-root depth without copying MOD bytes.
+    // Files on a volume without hard-link support fall back to an ordinary copy.
+    bool copied=false;
+    for(const auto& item:fs::recursive_directory_iterator(source)) {
+        rejectLink(item.path());
+        auto relative=item.path().lexically_relative(source);
+        auto destination=cache/relative;
+        if(item.is_directory()) { fs::create_directories(destination); continue; }
+        if(!item.is_regular_file()) continue;
+        fs::create_directories(destination.parent_path());
+        if(!snapshot && CreateHardLinkW(destination.c_str(),item.path().c_str(),nullptr)) continue;
+        std::error_code error;
+        fs::copy_file(item.path(),destination,fs::copy_options::overwrite_existing,error);
+        if(error) throw std::runtime_error("MOD cache materialization failed: "+error.message());
+        if(!snapshot) copied=true;
+    }
+    if(copied) log("hard links unavailable for some MOD files; copied fallback used");
 }
 
 void resetReloads(const fs::path& scripts) {
@@ -156,8 +181,8 @@ void publishReload(const fs::path& root,const fs::path& scripts,unsigned revisio
     auto stage=cache/L"pending";
     fs::create_directories(stage);
     // Owned staging directory; reuse syncMods' reparse checks before cleanup.
-    syncMods(root,stage);
-    auto generated=config(root);
+    syncMods(root,stage,true);
+    auto generated=config(root,"./generated-reloads/"+std::to_string(revision)+"/generated-mods/");
     auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
     if(!enabled.empty() && number(enabled,1)==0) generated="module.exports={version:1,mods:[]};\n";
     { std::ofstream f(stage/L"config.js",std::ios::binary); f<<generated; f.close(); check(bool(f),"write reload config"); }

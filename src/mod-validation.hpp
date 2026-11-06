@@ -31,6 +31,7 @@ fs::path modScriptPath(const fs::path& root,std::wstring name) {
                 if(!invalid) {
                     auto normalized=relative.generic_wstring();
                     if(normalized==L"bootstrap.js" || normalized==L"manager.js" || normalized==L"generated-config.js" ||
+                       normalized.rfind(L"mods/",0)==0 ||
                        normalized.rfind(L"generated-mods/",0)==0 || normalized.rfind(L"generated-reloads/",0)==0) {
                         try {
                             if(!haveRoot) { canonicalRoot=fs::canonical(root); haveRoot=true; }

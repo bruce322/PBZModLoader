@@ -51,6 +51,9 @@ dsound.dll、dxgi.dll；本加载器只需选择其中一个入口安装，不�
 
 热重载（Alt+F5）
 
+热重载默认关闭。先在 ProjectPBZ\PBZModLoader\mods.ini 的 [Loader] 段设置 HotReload=1，
+重启游戏后再使用 Alt+F5；默认 HotReload=0 时快捷键不会注册。
+
 修改 ProjectPBZ\PBZModLoader\mods 下的 JS 或依赖文件，保存完成后切回游戏按 Alt+F5。
 本地构建的 MOD 需先将新产物复制到上述安装目录。每次重载整组 MOD，包括未修改的 MOD。
 新增、删除 MOD 及 mods.ini 的 [Mods] 开关变化也会生效。
@@ -67,9 +70,11 @@ stop 超过 5 秒未完成会保留旧实例并跳过该 MOD（日志 reload blo
 日志和缓存
 
 日志：ProjectPBZ\PBZModLoader\evidence\<本次运行>\loader.log。
+状态摘要：ProjectPBZ\PBZModLoader\loader-status.log（每次启动覆盖，列出入口、MOD 列表、挂钩和热重载开关）。
 可查找 failed、reload blocked、reload complete；快捷键无响应时也检查注册失败记录。
-ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-mods、generated-reloads
-均为自动缓存，请勿编辑或在游戏运行中删除。启动时重建/清理，重载版本保留至下次启动。
+ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-mods（指向 mods 的硬链接视图，硬链接失败时复制）
+与 generated-reloads（热重载版本副本）均为自动缓存，请勿编辑或在游戏运行中删除。
+启动时重建/清理，重载版本保留至下次启动。
 长期大量重载会增加磁盘和模块缓存占用，可退出并重新启动游戏。
 
 停用和卸载

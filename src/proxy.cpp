@@ -13,6 +13,7 @@ static INIT_ONCE versionOnce=INIT_ONCE_STATIC_INIT;
 static HMODULE realVersion=nullptr;
 static std::atomic<FARPROC> versionFunctions[proxyCount]{};
 static fs::path reloadRoot,reloadScripts;
+static bool hotReloadEnabled=false;
 static bool (*originalValidateBytes)(const GameString*,const GameBytes*)=nullptr;
 static bool (*originalValidateText)(const GameString*,const GameString*)=nullptr;
 static bool validateModBytes(const GameString* path,const GameBytes* source) noexcept {
@@ -64,6 +65,36 @@ void log(const std::string& s) {
     // to use this handle without a C++ lock or allocation in DllMain.
     WriteFile(logFile,line.data(),(DWORD)line.size(),&written,nullptr);
 }
+static void writeStatus(const fs::path& root,const fs::path& game,const fs::path& evidence,
+                        const std::vector<ModInfo>& mods,const char* status,const std::string& error={}) noexcept {
+    if(root.empty()) return;
+    try {
+        std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::trunc);
+        if(!f) return;
+        f<<"PBZModLoader 1.0.0 (JS only)\r\n";
+        f<<"status="<<status<<"\r\n";
+        if(!game.empty()) {
+            f<<"game="<<utf8(game.wstring())<<"\r\n";
+            std::error_code errorCode; auto size=fs::file_size(game,errorCode);
+            if(!errorCode) f<<"game-size="<<size<<"\r\n";
+        }
+        wchar_t dll[32768]{};
+        if(GetModuleFileNameW(selfModule,dll,(DWORD)std::size(dll))) f<<"entry="<<utf8(dll)<<"\r\n";
+        size_t enabled=0; for(const auto& mod:mods) if(mod.enabled) ++enabled;
+        f<<"mods="<<mods.size()<<" enabled="<<enabled<<" disabled="<<(mods.size()-enabled)<<"\r\n";
+        for(const auto& mod:mods) f<<"mod "<<mod.id<<" "<<(mod.enabled?"enabled":"disabled")<<" "<<mod.entry<<"\r\n";
+        f<<"hooks="<<(status==std::string("installed")?"installed":"not-installed")<<"\r\n";
+        f<<"hot-reload="<<(hotReloadEnabled?"on":"off")<<"\r\n";
+        if(!evidence.empty()) f<<"detail="<<utf8(evidence.wstring())<<"\r\n";
+        if(!error.empty()) f<<"error="<<error<<"\r\n";
+    } catch(...) {}
+}
+static void appendStatus(const fs::path& root,const std::string& line) noexcept {
+    try {
+        std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::app);
+        if(f) f<<line<<"\r\n";
+    } catch(...) {}
+}
 static DWORD WINAPI monitor(void* context) noexcept {
     U64 slab=(U64)context,next=0,starts=0;
     bool hotkeyRegistered=false,hotkeyWarning=false;
@@ -74,6 +105,7 @@ static DWORD WINAPI monitor(void* context) noexcept {
             drain(GetCurrentProcess(),slab,next);
             U64 current=0; read(GetCurrentProcess(),slab+4104,&current,8);
             if(current!=starts) { starts=current; log("main-start count="+std::to_string(starts)); }
+            if(!hotReloadEnabled) { Sleep(50); continue; }
             DWORD foregroundProcess=0;
             GetWindowThreadProcessId(GetForegroundWindow(),&foregroundProcess);
             bool focused=foregroundProcess==GetCurrentProcessId();
@@ -95,12 +127,14 @@ static DWORD WINAPI monitor(void* context) noexcept {
                 // shortcut or queue repeated requests while preparing a batch.
                 UnregisterHotKey(nullptr,hotkeyId); hotkeyRegistered=false;
                 try {
-                    publishReload(reloadRoot,reloadScripts,revision);
-                    log("hot reload published revision="+std::to_string(revision++));
+                    const unsigned published=revision++;
+                    publishReload(reloadRoot,reloadScripts,published);
+                    log("hot reload published revision="+std::to_string(published));
+                    appendStatus(reloadRoot,"hot-reload revision="+std::to_string(published)+" published");
                 }
                 catch(const std::exception& e) {
                     log(std::string("hot reload preparation failed: ")+e.what());
-                    try { publishReloadFailure(reloadScripts,revision); ++revision; }
+                    try { publishReloadFailure(reloadScripts,revision); appendStatus(reloadRoot,"hot-reload revision="+std::to_string(revision)+" failed: "+e.what()); ++revision; }
                     catch(const std::exception& failure) { log(std::string("reload failure notification: ")+failure.what()); }
                 }
             }
@@ -124,14 +158,16 @@ extern "C" void pbz_initialize() noexcept {
        !FlushInstructionCache(GetCurrentProcess(),pbz_original_entry,sizeof(entryBytes))) {
         RaiseFailFastException(nullptr,nullptr,0); return;
     }
+    fs::path game,root,scripts,evidence;
+    std::vector<ModInfo> mods;
     try {
         wchar_t exe[32768]; check(GetModuleFileNameW(nullptr,exe,32768)>0,"game path");
-        const fs::path game=exe;
+        game=exe;
         const fs::path project=findProject(game);
-        const fs::path root=project/L"PBZModLoader", scripts=project/L"Content/JavaScript/PBZModLoader";
+        root=project/L"PBZModLoader", scripts=project/L"Content/JavaScript/PBZModLoader";
         SYSTEMTIME st; GetLocalTime(&st); wchar_t name[80];
         swprintf(name,80,L"%04u%02u%02u-%02u%02u%02u-%lu-dll",st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond,GetCurrentProcessId());
-        fs::path evidence=root/L"evidence"/name; fs::create_directories(evidence);
+        evidence=root/L"evidence"/name; fs::create_directories(evidence);
         logFile=CreateFileW((evidence/L"loader.log").c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
         check(logFile!=INVALID_HANDLE_VALUE,"create DLL log");
         log("backend=dll; startup=exe-entry; debugger-api=none");
@@ -144,7 +180,13 @@ extern "C" void pbz_initialize() noexcept {
         log("proxy-system="+utf8(system));
         log("project="+utf8(project.wstring()));
         auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
-        if(!enabled.empty() && number(enabled,1)==0) { log("MODs disabled by Loader.Enabled=0; original game continues"); SetLastError(savedError); return; }
+        auto hotReload=ini(root/L"mods.ini",L"Loader",L"HotReload");
+        try { hotReloadEnabled=!hotReload.empty() && number(hotReload,1)==1; }
+        catch(...) { hotReloadEnabled=false; log("HotReload value invalid; disabled"); }
+        if(!enabled.empty() && number(enabled,1)==0) {
+            writeStatus(root,game,evidence,mods,"disabled","Loader.Enabled=0");
+            log("MODs disabled by Loader.Enabled=0; original game continues"); SetLastError(savedError); return;
+        }
         auto image=snapshotImage(GetCurrentProcess(),(U64)GetModuleHandleW(nullptr));
         const auto sites=resolveSites(image);
         { std::ostringstream message; message<<"signatures validated; call-rva=0x"<<std::hex<<sites.call<<" start-rva=0x"<<sites.start;
@@ -153,7 +195,8 @@ extern "C" void pbz_initialize() noexcept {
         resetReloads(scripts);
         reloadRoot=root; reloadScripts=scripts;
         syncMods(root,scripts);
-        auto generated=config(root);
+        auto generated=config(root,"./generated-mods/",&mods);
+        if(generated.size()>256*1024) throw std::runtime_error("Generated config exceeds 256 KiB");
         auto temporary=scripts/(L"generated-config."+std::to_wstring(GetCurrentProcessId())+L".tmp");
         { std::ofstream f(temporary,std::ios::binary); f<<generated; f.close(); check(bool(f),"write config"); }
         check(MoveFileExW(temporary.c_str(),(scripts/L"generated-config.js").c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH),"publish config");
@@ -163,12 +206,21 @@ extern "C" void pbz_initialize() noexcept {
             originalValidateText=reinterpret_cast<decltype(originalValidateText)>(base+sites.validateText);
         }
         auto installed=install(GetCurrentProcess(),base,image,sites,(U64)&validateModBytes,(U64)&validateModText);
+        writeStatus(root,game,evidence,mods,"installed");
         if(sites.validateBytes) log("script validation adapters installed; scope=PBZModLoader; content=local-file-exact");
         log("native hooks installed; configuration published");
+        log(std::string("hot reload ")+(hotReloadEnabled?"enabled":"disabled")+" (Alt+F5)");
         HANDLE worker=CreateThread(nullptr,0,monitor,(void*)installed.slab,0,nullptr);
         if(worker) CloseHandle(worker); else log("ERROR monitor: CreateThread failed; MOD loading remains enabled");
-    } catch(const std::exception& e) { log(std::string("MODs skipped: ")+e.what()+"; original game continues"); }
-    catch(...) { log("MODs skipped: unknown initialization error; original game continues"); }
+    } catch(const std::exception& e) {
+        const std::string message=e.what();
+        try { writeStatus(root,game,evidence,mods,"failed",message); } catch(...) {}
+        log(std::string("MODs skipped: ")+message+"; original game continues");
+    }
+    catch(...) {
+        try { writeStatus(root,game,evidence,mods,"failed","unknown initialization error"); } catch(...) {}
+        log("MODs skipped: unknown initialization error; original game continues");
+    }
     SetLastError(savedError);
 }
 

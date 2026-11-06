@@ -151,8 +151,9 @@ npm ci
 玩家的 mods.ini 与 mods/ 均位于 ProjectPBZ/PBZModLoader，Entry 相对于该目录。
 旧版带 Mods 层的目录需整体上移到 ProjectPBZ/PBZModLoader，并同步更新 DLL；
 具体迁移步骤见安装说明，mods.ini 中的 Entry 无需修改。
-启动时 DLL 校验配置，将 mods/ 同步到 Content/JavaScript/PBZModLoader/generated-mods，
-供原有 PuerTS 搜索路径加载；该缓存每次启动重建，不应直接编辑。运行中按 Alt+F5 可触发热重载，详见下文。
+启动时 DLL 只生成清单，并在 Content/JavaScript/PBZModLoader/generated-mods 建立指向 mods/ 的硬链接视图
+（同卷零字节；不支持硬链接时回退复制），不复制 MOD 正文。该缓存每次启动重建，不应直接编辑。
+热重载默认关闭；在 mods.ini 的 [Loader] 设置 HotReload=1 并重启游戏后，按 Alt+F5 可触发，详见下文。
 Content/JavaScript 下只需随包安装 bootstrap.js 和 manager.js，MOD 源文件无需放在那里。
 原生编译输出 build 下的 version.dll、hid.dll、winmm.dll、dsound.dll、dxgi.dll。
 -VerifyOnly -Test 可检查已有 DLL 而不重新编译它们。
@@ -178,10 +179,14 @@ TypeScript MOD 应使用 `templates/ts-mod` 在开发机执行 `npm ci`、`npm r
 
 ### MOD 热重载
 
-安装新版 DLL、bootstrap.js 和 manager.js 并启动游戏后，保存 `ProjectPBZ/PBZModLoader/mods/` 下的 JS 或依赖文件，切回游戏按 **Alt+F5**。仅游戏窗口在前台时响应，按住不连发，不监听文件变化。JS 线程每秒接收一次重载请求。本地构建的 MOD 需先把新产物覆盖到安装目录。完成后左上角显示约 4 秒提示，区分成功、失败或跳过；提示不拦截鼠标。
+热重载默认关闭。先在 `mods.ini` 的 `[Loader]` 段设置 `HotReload=1` 并重启游戏（默认 0 时 Alt+F5 不会注册）。启用后，保存 `ProjectPBZ/PBZModLoader/mods/` 下的 JS 或依赖文件，切回游戏按 **Alt+F5**。仅游戏窗口在前台时响应，按住不连发，不监听文件变化。JS 线程每秒接收一次重载请求。本地构建的 MOD 需先把新产物覆盖到安装目录。完成后左上角显示约 4 秒提示，区分成功、失败或跳过；提示不拦截鼠标。
 
-每次快捷键重载整组 MOD（包括未修改的 MOD），以独立版本目录隔离 CommonJS 入口及相对依赖缓存。加载新入口前，先调用并等待所有旧实例导出的 `stop()`，支持 Promise；MOD 须在其中清除定时器、取消事件订阅并释放持有的资源。无持久资源的 MOD 也应导出空 `stop()`。缺少该函数或清理抛错时保留旧实例并跳过该 MOD，新版本不会重复注册。`stop()` 超过 5 秒未完成时判定清理失败，保留旧实例并跳过该 MOD（日志 `reload blocked ... stop() timed out`），本次运行不再重试；期间不会启动另一轮重载。切图和游戏退出不触发 stop。
+每次快捷键重载整组 MOD（包括未修改的 MOD），以独立版本目录（副本）隔离 CommonJS 入口及相对依赖缓存。加载新入口前，先调用并等待所有旧实例导出的 `stop()`，支持 Promise；MOD 须在其中清除定时器、取消事件订阅并释放持有的资源。无持久资源的 MOD 也应导出空 `stop()`。缺少该函数或清理抛错时保留旧实例并跳过该 MOD，新版本不会重复注册。`stop()` 超过 5 秒未完成时判定清理失败，保留旧实例并跳过该 MOD（日志 `reload blocked ... stop() timed out`），本次运行不再重试；期间不会启动另一轮重载。切图和游戏退出不触发 stop。
 
 新增、删除及 `[Mods] ID=0` 的变化按 Alt+F5 后同样生效；删除或禁用前也会调用 stop。JS 入口执行异常可能已经产生副作用且无法取得其导出，因此失败实例在本次游戏运行中不再自动重试，修复后需重启。MOD 应自行清理初始化失败前产生的资源。
 
 临时产物在 `Content/JavaScript/PBZModLoader/generated-reloads/`，版本目录保留至下一次启动清理，以支持旧实例和延迟 require；长时间大量重载会增加磁盘和模块缓存占用。仅 MOD 目录内的相对依赖随版本隔离，勿用加载器缓存绝对路径跨版本引用。日志查找 `hot reload published`、`stopped`、`reload complete` 和 `reload blocked`。
+
+### 玩家可读状态
+
+每次启动会在 `ProjectPBZ/PBZModLoader/loader-status.log` 覆盖写入一份简表：加载器版本、游戏路径与大小、入口 DLL、MOD 总数/启用/禁用及列表、挂钩状态、热重载开关和 evidence 日志路径；重载结果会追加到同一文件。该文件是只读摘要，详细原因仍看 `evidence/<本次运行>/loader.log`。

@@ -1,20 +1,25 @@
 'use strict';
 // CommonJS, deliberately independent of Node APIs: runs in the game's PuerTS VM.
+const ID = /^[A-Za-z0-9_-]{1,64}$/;
+const ENTRY = /^(?:\.\/generated-mods\/|\.\/generated-reloads\/[0-9]+\/generated-mods\/)(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.js$/;
 function validate(config) {
-    if (!config || config.version !== 1 || !Array.isArray(config.mods)) {
+    if (!config || config.version !== 1 || !Array.isArray(config.mods) || config.mods.length > 128) {
         throw new Error('Unsupported MOD configuration');
     }
     const ids = new Set();
     for (const mod of config.mods) {
-        if (!mod || !/^[A-Za-z0-9_-]+$/.test(mod.id) || ids.has(mod.id) ||
+        if (!mod || typeof mod.id !== 'string' || !ID.test(mod.id) || ids.has(mod.id.toLowerCase()) ||
             typeof mod.enabled !== 'boolean' || typeof mod.entry !== 'string' ||
-            !/^mods\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.js$/.test(mod.entry)) {
+            mod.entry.length > 512 || !ENTRY.test(mod.entry)) {
             throw new Error('Invalid or duplicate MOD: ' + (mod && mod.id));
         }
-        ids.add(mod.id);
+        if (mod.entry.split('/').slice(-2, -1)[0].toLowerCase() !== mod.id.toLowerCase()) {
+            throw new Error('MOD entry does not match ID: ' + mod.id);
+        }
+        ids.add(mod.id.toLowerCase());
     }
 }
-exports.load = function load(config, importMod, log, prefix = './generated-mods/') {
+exports.load = function load(config, importMod, log) {
     validate(config);
     const result = [];
     for (const mod of config.mods) {
@@ -24,7 +29,7 @@ exports.load = function load(config, importMod, log, prefix = './generated-mods/
             continue;
         }
         try {
-            const instance = importMod(prefix + mod.entry.slice('mods/'.length));
+            const instance = importMod(mod.entry);
             result.push({ id: mod.id, status: 'loaded', instance });
             log('loaded ' + mod.id);
         } catch (error) {
@@ -51,7 +56,7 @@ function stopWithTimeout(instance, timeoutMs) {
         error => { clearTimeout(timer); throw error; });
 }
 
-exports.reload = async function reload(previous, config, importMod, log, prefix, stopTimeoutMs = 5000) {
+exports.reload = async function reload(previous, config, importMod, log, stopTimeoutMs = 5000) {
     validate(config);
     const blocked = new Map();
     for (const mod of previous) {
@@ -78,7 +83,7 @@ exports.reload = async function reload(previous, config, importMod, log, prefix,
             next.push(blocked.get(mod.id));
             blocked.delete(mod.id);
         } else {
-            next.push(...exports.load({ version: 1, mods: [mod] }, importMod, log, prefix));
+            next.push(...exports.load({ version: 1, mods: [mod] }, importMod, log));
         }
     }
     // Keep failed cleanup instances reachable even if removed from configuration.
@@ -96,7 +101,7 @@ exports.watch = function watch(state, importMod, log, schedule = setInterval, no
             // Publication is atomic. A missing next revision is the normal idle state.
             try { config = importMod(prefix + 'config'); } catch (_) { return; }
             if (config.error) throw new Error(config.error);
-            state.mods = await exports.reload(state.mods, config, importMod, log, prefix + 'generated-mods/');
+            state.mods = await exports.reload(state.mods, config, importMod, log);
             log('reload complete revision=' + revision);
             const failed = state.mods.filter(mod => mod.status === 'failed' || mod.reloadError).length;
             const loaded = state.mods.filter(mod => mod.status === 'loaded' && !mod.reloadError).length;

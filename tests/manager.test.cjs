@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const base = path.resolve(__dirname, '../runtime/ProjectPBZ/Content/JavaScript/PBZModLoader');
 const { load } = require(path.join(base, 'manager.js'));
-const mod = (id, enabled = true, entry = 'mods/' + id + '/main.js') => ({ id, enabled, entry });
+const mod = (id, enabled = true, entry = './generated-mods/' + id + '/main.js') => ({ id, enabled, entry });
 test('ordered loading, disabled entries, failure isolation', () => {
     const calls = [], logs = [];
     const result = load({ version: 1, mods: [mod('a'), mod('off', false), mod('bad'), mod('b')] }, entry => {
@@ -17,11 +17,18 @@ test('ordered loading, disabled entries, failure isolation', () => {
     assert.match(logs[2], /intentional/);
 });
 test('invalid config rejected before any MOD executes', () => {
-    for (const mods of [[mod('a'), mod('a')], [mod('a', true, '../escape.js')], [mod('a', true, 'mods/a.ts')], [mod('a', 'true')]]) {
+    for (const mods of [[mod('a'), mod('a')], [mod('A'), mod('a')], [mod('a', true, './generated-mods/../escape.js')], [mod('a', true, './generated-mods/b/main.js')], [mod('a', true, './generated-mods/a/b/main.js')], [mod('a', true, './generated-mods/a/main.ts')], [mod('a', 'true')], [mod('a', true, './generated-reloads/x/generated-mods/a/main.js')], [mod('a', true, './generated-mods/' + 'x'.repeat(520) + '/main.js')]]) {
         let calls = 0;
         assert.throws(() => load({version: 1, mods}, () => { calls++; }, () => {}));
         assert.equal(calls, 0);
     }
+});
+test('MOD count and ID limits reject oversized discovery data', () => {
+    let calls = 0;
+    const tooMany = Array.from({ length: 129 }, (_, i) => mod('m' + i));
+    assert.throws(() => load({ version: 1, mods: tooMany }, () => { calls++; }, () => {}));
+    assert.throws(() => load({ version: 1, mods: [mod('a'.repeat(65))] }, () => { calls++; }, () => {}));
+    assert.equal(calls, 0);
 });
 test('bootstrap preserves original startup errors and loads only once', () => {
     const source = fs.readFileSync(path.join(base, 'bootstrap.js'), 'utf8');
@@ -47,8 +54,8 @@ test('reload awaits cleanup before executing any new MOD and isolates cleanup fa
     ];
     const result = await reload(old, { version: 1, mods: [mod('a'), mod('b')] }, entry => {
         calls.push(entry); return {};
-    }, () => {}, './generated-reloads/1/generated-mods/');
-    assert.deepEqual(calls, ['stop a', 'stop removed', './generated-reloads/1/generated-mods/a/main.js']);
+    }, () => {});
+    assert.deepEqual(calls, ['stop a', 'stop removed', './generated-mods/a/main.js']);
     assert.equal(result[1], old[1]);
 });
 
@@ -58,7 +65,7 @@ test('reload times out a hung stop() and keeps the old MOD blocked', async () =>
     const calls = [];
     const result = await reload(old, { version: 1, mods: [mod('a')] }, entry => {
         calls.push(entry); return {};
-    }, () => {}, './generated-mods/', 20);
+    }, () => {}, 20);
     assert.deepEqual(calls, []);
     assert.equal(result[0], old[0]);
     assert.equal(old[0].reloadError, true);
@@ -83,7 +90,7 @@ test('watch serializes slow stops, ignores missing revisions and uses fresh depe
     watch(state, entry => {
         if (entry.endsWith('/config')) {
             if (!published || !entry.includes('/1/')) throw Error('missing');
-            return { version: 1, mods: [mod('a')] };
+            return { version: 1, mods: [mod('a', true, './generated-reloads/1/generated-mods/a/main.js')] };
         }
         assert.equal(entry, './generated-reloads/1/generated-mods/a/main.js');
         assert.equal(active, 0); active++; starts++;
