@@ -17,7 +17,7 @@ test('ordered loading, disabled entries, failure isolation', () => {
     assert.match(logs[2], /intentional/);
 });
 test('invalid config rejected before any MOD executes', () => {
-    for (const mods of [[mod('a'), mod('a')], [mod('A'), mod('a')], [mod('a', true, './mods/../escape.js')], [mod('a', true, './mods/b/main.js')], [mod('a', true, './mods/a/b/main.js')], [mod('a', true, './generated-mods/a/main.js')], [mod('a', true, './mods/a/main.ts')], [mod('a', 'true')], [mod('a', true, './generated-reloads/x/generated-mods/a/main.js')], [mod('a', true, './mods/' + 'x'.repeat(520) + '/main.js')]]) {
+    for (const mods of [[mod('a'), mod('a')], [mod('A'), mod('a')], [mod('a', true, './mods/../escape.js')], [mod('a', true, './mods/b/main.js')], [mod('a', true, './mods/a/b/main.js')], [mod('a', true, './mods/a/other.js')], [mod('a', true, './generated-mods/a/main.js')], [mod('a', true, './mods/a/main.ts')], [mod('a', 'true')], [mod('a', true, './generated-reloads/x/generated-mods/a/main.js')], [mod('a', true, './mods/' + 'x'.repeat(520) + '/main.js')]]) {
         let calls = 0;
         assert.throws(() => load({version: 1, mods}, () => { calls++; }, () => {}));
         assert.equal(calls, 0);

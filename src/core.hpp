@@ -64,15 +64,26 @@ int number(const std::wstring& s,int max) {
     auto n=std::stoul(s); if(n>(unsigned)max) throw std::runtime_error("Config number out of range"); return (int)n;
 }
 struct ModInfo { std::string id,entry; bool enabled; };
+bool isReparsePoint(const fs::path& p) {
+    auto attributes=GetFileAttributesW(p.c_str());
+    return attributes!=INVALID_FILE_ATTRIBUTES && (attributes&FILE_ATTRIBUTE_REPARSE_POINT);
+}
 std::string config(const fs::path& root,const std::string& loadPrefix,std::vector<ModInfo>* out=nullptr) {
     std::string prefix=loadPrefix;
     if(!prefix.empty() && prefix.back()!='/') prefix+='/';
-    fs::path p=root/L"mods.ini"; if(!fs::is_regular_file(p)) throw std::runtime_error("Missing mods.ini");
+    if(isReparsePoint(root)) throw std::runtime_error("PBZModLoader directory must not be a reparse point");
+    fs::path p=root/L"mods.ini";
+    if(isReparsePoint(p)) throw std::runtime_error("mods.ini must not be a reparse point");
+    if(!fs::is_regular_file(p)) throw std::runtime_error("Missing mods.ini");
     if(utf8Bom(p)) throw std::runtime_error("mods.ini has a UTF-8 BOM; save as UTF-8 without BOM or ANSI");
     if(ini(p,L"Loader",L"Version")!=L"1") throw std::runtime_error("Unsupported config version");
     std::map<std::string,std::string> discovered;
-    if(fs::is_directory(root/L"mods")) for(const auto& item:fs::directory_iterator(root/L"mods")) {
+    const fs::path mods=root/L"mods";
+    if(isReparsePoint(mods)) throw std::runtime_error("mods directory must not be a reparse point");
+    if(fs::is_directory(mods)) for(const auto& item:fs::directory_iterator(mods)) {
         auto id=utf8(item.path().filename().wstring());
+        if(isReparsePoint(item.path()) || isReparsePoint(item.path()/L"main.js"))
+            throw std::runtime_error("MOD must not contain reparse points: "+id);
         if(!item.is_directory() || !std::regex_match(id,std::regex("[A-Za-z0-9_-]{1,64}")) ||
            !fs::is_regular_file(item.path()/L"main.js")) continue;
         for(const auto& [seen,_]:discovered) if(_stricmp(seen.c_str(),id.c_str())==0)
