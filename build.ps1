@@ -19,6 +19,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Native test build failed' }
         & ./build/native-test.exe
         if ($LASTEXITCODE -ne 0) { throw 'Native tests failed' }
+        & $Compiler -std=c++17 -O2 -Wall -Wextra -static tests/evidence-log.cpp -lbcrypt -o build/evidence-log-test.exe
+        if ($LASTEXITCODE -ne 0) { throw 'Evidence log test build failed' }
+        & ./build/evidence-log-test.exe
+        if ($LASTEXITCODE -ne 0) { throw 'Evidence log tests failed' }
         if ($GameExe) {
             & $Compiler -std=c++17 -O2 -Wall -Wextra -static tests/signatures.cpp -lbcrypt -o build/signature-test.exe
             if ($LASTEXITCODE -ne 0) { throw 'Signature test build failed' }

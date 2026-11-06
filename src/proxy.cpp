@@ -2,13 +2,14 @@
 #include "core.hpp"
 #include "mod-validation.hpp"
 #include "proxy_config.hpp"
+#include "evidence-log.hpp"
 #include <atomic>
 
 extern "C" void pbz_entry_gate();
 extern "C" { void* pbz_original_entry=nullptr; }
 static unsigned char entryBytes[14];
 static HMODULE selfModule=nullptr;
-static HANDLE logFile=INVALID_HANDLE_VALUE;
+static EvidenceLog evidenceLog;
 static INIT_ONCE versionOnce=INIT_ONCE_STATIC_INIT;
 static HMODULE realVersion=nullptr;
 static std::atomic<FARPROC> versionFunctions[proxyCount]{};
@@ -60,13 +61,9 @@ extern "C" FARPROC pbz_resolve_version(unsigned index) noexcept {
     SetLastError(error); return function;
 }
 void log(const std::string& s) {
-    if(logFile==INVALID_HANDLE_VALUE) return;
     SYSTEMTIME t; GetLocalTime(&t); char time[40];
     snprintf(time,sizeof(time),"[%02u:%02u:%02u.%03u] ",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds);
-    std::string line=std::string(time)+s+"\r\n"; DWORD written;
-    // FILE_APPEND_DATA and a single WriteFile per record allow the shutdown marker
-    // to use this handle without a C++ lock or allocation in DllMain.
-    WriteFile(logFile,line.data(),(DWORD)line.size(),&written,nullptr);
+    evidenceLog.append(std::string(time)+s+"\r\n");
 }
 static void writeStatus(const fs::path& root,const fs::path& game,const fs::path& evidence,
                         const std::vector<ModInfo>& mods,const char* status,const std::string& error={}) noexcept {
@@ -74,7 +71,7 @@ static void writeStatus(const fs::path& root,const fs::path& game,const fs::path
     try {
         std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::trunc);
         if(!f) return;
-        f<<"PBZModLoader 1.0.3 (JS only)\r\n";
+        f<<"PBZModLoader 1.0.5 (JS only)\r\n";
         f<<"status="<<status<<"\r\n";
         if(!game.empty()) {
             f<<"game="<<utf8(game.wstring())<<"\r\n";
@@ -178,8 +175,7 @@ extern "C" void pbz_initialize() noexcept {
         SYSTEMTIME st; GetLocalTime(&st); wchar_t name[80];
         swprintf(name,80,L"%04u%02u%02u-%02u%02u%02u-%lu-dll",st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond,GetCurrentProcessId());
         evidence=root/L"evidence"/name; fs::create_directories(evidence);
-        logFile=CreateFileW((evidence/L"loader.log").c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
-        check(logFile!=INVALID_HANDLE_VALUE,"create DLL log");
+        evidenceLog.initialize(evidence,ini(root/L"mods.ini",L"Loader",L"LogDirectoryLimitMiB"));
         log("backend=dll; startup=exe-entry; debugger-api=none");
         log("entry-restored; pid="+std::to_string(GetCurrentProcessId()));
         HMODULE pinned=nullptr;
@@ -255,8 +251,8 @@ extern "C" void pbz_initialize() noexcept {
     SetLastError(savedError);
 }
 
-// Called with the Windows loader lock held. No file I/O, hash, STL allocation,
-// LoadLibrary, thread creation/wait, configuration or PuerTS calls occur here.
+// armEntry runs with the Windows loader lock held: no file I/O, hash, STL
+// allocation, LoadLibrary, thread creation/wait, configuration or PuerTS calls.
 __attribute__((noinline)) static void armEntry(HMODULE module) noexcept {
     // PROCESS_ATTACH is serialized. Keep long-path buffers out of thread stacks:
     // the game creates small-stack threads that also receive DLL notifications.
@@ -299,10 +295,10 @@ BOOL WINAPI DllMain(HINSTANCE module,DWORD reason,void* reserved) {
         // Accidentally installing multiple entries must not chain entry gates.
         if(reserved) armEntry(module);
     }
-    else if(reason==DLL_PROCESS_DETACH && reserved && logFile!=INVALID_HANDLE_VALUE) {
-        static const char marker[]="process-detach shutdown=true (not an exit-code assertion)\r\n";
-        DWORD written; WriteFile(logFile,marker,sizeof(marker)-1,&written,nullptr);
-        // No joins, loader calls or C++ stream destruction here. OS closes the handle.
+    else if(reason==DLL_PROCESS_DETACH && reserved) {
+        // Append the detach marker only; no allocation, joins, loader calls or
+        // PuerTS cleanup. The OS closes the handle after this returns.
+        evidenceLog.shutdown();
     }
     return TRUE;
 }

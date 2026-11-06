@@ -26,6 +26,10 @@ Install Node.js and npm on your development machine, then run `npm ci`, `npm run
 
 This repository contains loader source code, runtime file templates, the SDK, and development tools. Players should download an installation package from the release page above. Locally built player packages are placed in `releases/`; only runtime files belong in the game installation directory.
 
+## 1.0.5: log rotation and disk budget
+
+Evidence logs are split into 8 MiB segments (`loader.log`, `loader.1.log`, ...), and the whole evidence directory is capped at 100 MiB by default. When over budget, the oldest run segments are removed first. Set `[Loader] LogDirectoryLimitMiB` to 16-512; out-of-range values are clamped and missing/invalid values use 100. Writes are serialized in-process, and a process-detach marker is appended on exit.
+
 ## 1.0.3: hot-reload failure notification fix
 
 Fixed the revision being advanced twice when hot-reload preparation failed.
@@ -178,3 +182,7 @@ For startup-crash troubleshooting, try `SafeMode=1` first. If `ProjectPBZ/Conten
 ### Player-readable status
 
 Each startup overwrites `ProjectPBZ/Content/JavaScript/PBZModLoader/loader-status.log` with a short summary: loader version, game path and size, entry DLL, total/enabled/disabled mods and their list, hook/diagnostic/safe-mode state, hot-reload switch, and the evidence log path. Reload results are appended to the same file. This file is a read-only summary; detailed reasons remain in `evidence/<run>/loader.log`.
+
+### Log rotation and disk budget
+
+Each run's loader log is split into 8 MiB segments, and the evidence directory is capped at 100 MiB by default. When over budget, the oldest run segments are removed first; the segment being written is never removed. If space is still insufficient, writes pause and retry every 5 seconds. Adjust `[Loader] LogDirectoryLimitMiB` in `mods.ini`: 16-512 is valid, missing/invalid uses 100, and out-of-range values are clamped.
