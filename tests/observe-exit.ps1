@@ -11,7 +11,7 @@ $result=[ordered]@{
     gameExe=$gameInfo.ExecutablePath
     parentExe=$parent.ExecutablePath
     grandparentExe=$grandparent.ExecutablePath
-    proxyModules=@($gameProcess.Modules | Where-Object ModuleName -ieq 'version.dll' | ForEach-Object { $_.FileName })
+    proxyModules=@($gameProcess.Modules | Where-Object { $_.ModuleName -match '^(version|hid|winmm|dsound|dxgi)\.dll$' } | ForEach-Object { $_.FileName })
     observedAt=(Get-Date).ToString('o')
     exitCode=$null
 }

@@ -3,6 +3,7 @@
 #include "mod-validation.hpp"
 #include "proxy_config.hpp"
 #include "evidence-log.hpp"
+#include "loader-version.hpp"
 #include <atomic>
 
 extern "C" void pbz_entry_gate();
@@ -71,7 +72,7 @@ static void writeStatus(const fs::path& root,const fs::path& game,const fs::path
     try {
         std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::trunc);
         if(!f) return;
-        f<<"PBZModLoader 1.0.6 (JS only)\r\n";
+        f<<"PBZModLoader "<<PBZ_LOADER_VERSION<<" (JS only)\r\n";
         f<<"status="<<status<<"\r\n";
         if(!game.empty()) {
             f<<"game="<<utf8(game.wstring())<<"\r\n";
@@ -98,6 +99,62 @@ static void appendStatus(const fs::path& root,const std::string& line) noexcept 
         std::ofstream f(root/L"loader-status.log",std::ios::binary|std::ios::app);
         if(f) f<<line<<"\r\n";
     } catch(...) {}
+}
+// Initialization can fail before the runtime directory is known (for example
+// when a proxy DLL is copied to the wrong folder). loader-status.log and the
+// evidence log are unreachable then, so leave a self-contained diagnostic
+// beside the game executable and fall back to %TEMP%.
+static void writeStartupDiagnostic(const fs::path& game,const std::string& message) noexcept {
+    try {
+        SYSTEMTIME st; GetLocalTime(&st);
+        char stamp[32];
+        snprintf(stamp,sizeof(stamp),"%04u-%02u-%02u %02u:%02u:%02u",st.wYear,st.wMonth,st.wDay,st.wHour,st.wMinute,st.wSecond);
+        std::ostringstream out;
+        out<<"PBZModLoader "<<PBZ_LOADER_VERSION<<" (JS only) startup diagnostic\r\n";
+        out<<"time="<<stamp<<"\r\n";
+        out<<"pid="<<GetCurrentProcessId()<<"\r\n";
+        out<<"error="<<message<<"\r\n";
+        if(!game.empty()) {
+            std::error_code sizeError; const auto size=fs::file_size(game,sizeError);
+            out<<"game="<<utf8(game.wstring())<<"\r\n";
+            if(!sizeError) out<<"game-size="<<size<<"\r\n";
+            out<<"search-start="<<utf8(game.parent_path().wstring())<<"\r\n";
+            bool foundRuntime=false;
+            auto dir=game.parent_path();
+            for(int depth=0;!dir.empty() && depth<8;++depth) {
+                const auto candidate=dir.filename()==L"ProjectPBZ"?dir:dir/L"ProjectPBZ";
+                std::error_code contentError,collectorError;
+                const bool content=fs::is_directory(candidate/L"Content",contentError);
+                const bool collector=fs::is_regular_file(candidate/L"Content/JavaScript/PBZModLoader/mods.ini",collectorError);
+                out<<"checked["<<depth<<"]="<<utf8(dir.wstring())<<" content="<<(content?"yes":"no")<<" mods-ini="<<(collector?"yes":"no")<<"\r\n";
+                foundRuntime=foundRuntime||content;
+                const auto parent=dir.parent_path(); if(parent==dir) break; dir=parent;
+            }
+            if(!foundRuntime) out<<"hint=ProjectPBZ is not above this executable; extract platform/ and ProjectPBZ/ beside PBZ.exe (do not add an extra folder level)\r\n";
+            else out<<"hint=ProjectPBZ exists above this executable but the PBZModLoader files are incomplete; reinstall the loader\r\n";
+        }
+        wchar_t dll[32768]{};
+        if(GetModuleFileNameW(selfModule,dll,(DWORD)std::size(dll))) out<<"entry="<<utf8(dll)<<"\r\n";
+        const std::string text=out.str();
+        std::vector<fs::path> targets;
+        if(!game.empty()) targets.push_back(game.parent_path()/L"PBZModLoader-diagnostic.log");
+        wchar_t temp[32768]{}; const DWORD tempLength=GetTempPathW((DWORD)std::size(temp),temp);
+        if(tempLength && tempLength<std::size(temp)) targets.push_back(fs::path(std::wstring(temp,tempLength))/L"PBZModLoader-diagnostic.log");
+        for(const auto& target:targets) {
+            std::ofstream file(target,std::ios::binary|std::ios::trunc);
+            if(!file) continue;
+            file.write(text.data(),(std::streamsize)text.size()); file.close();
+            if(file) return;
+        }
+    } catch(...) {}
+}
+static void clearStartupDiagnostic(const fs::path& game) noexcept {
+    if(game.empty()) return;
+    std::error_code ignored;
+    fs::remove(game.parent_path()/L"PBZModLoader-diagnostic.log",ignored);
+    wchar_t temp[32768]{}; const DWORD length=GetTempPathW((DWORD)std::size(temp),temp);
+    if(length && length<std::size(temp))
+        fs::remove(fs::path(std::wstring(temp,length))/L"PBZModLoader-diagnostic.log",ignored);
 }
 static DWORD WINAPI monitor(void* context) noexcept {
     U64 slab=(U64)context,next=0,starts=0;
@@ -182,6 +239,10 @@ extern "C" void pbz_initialize() noexcept {
         auto logPinned=ini(root/L"mods.ini",L"Loader",L"LogPinnedMax");
         auto logSegment=ini(root/L"mods.ini",L"Loader",L"LogSegmentMiB");
         evidenceLog.initialize(evidence,logBudget,logRetention,logMode,logPinned,logSegment);
+        if(!logMode.empty()) {
+            std::wstring mode=logMode; for(auto& ch:mode) ch=static_cast<wchar_t>(std::towlower(ch));
+            if(mode!=L"full" && mode!=L"errors" && mode!=L"off") log("LogMode value invalid; using full");
+        }
         log("backend=dll; startup=exe-entry; debugger-api=none");
         log("entry-restored; pid="+std::to_string(GetCurrentProcessId()));
         HMODULE pinned=nullptr;
@@ -195,7 +256,7 @@ extern "C" void pbz_initialize() noexcept {
         auto hotReload=ini(root/L"mods.ini",L"Loader",L"HotReload");
         auto loggerHooks=ini(root/L"mods.ini",L"Loader",L"LoggerHooks");
         auto safeMode=ini(root/L"mods.ini",L"Loader",L"SafeMode");
-        try { hotReloadEnabled=!hotReload.empty() && number(hotReload,0)==1; }
+        try { hotReloadEnabled=!hotReload.empty() && number(hotReload,1)==1; }
         catch(...) { hotReloadEnabled=false; log("HotReload value invalid; disabled"); }
         try { loggerHooksActive=loggerHooks.empty() || number(loggerHooks,1)==1; }
         catch(...) { loggerHooksActive=false; log("LoggerHooks value invalid; disabled"); }
@@ -207,13 +268,14 @@ extern "C" void pbz_initialize() noexcept {
         }
         const auto marker=root/L"loader-initializing.marker";
         previousRunUnclean=fs::exists(marker);
-        { std::ofstream f(marker,std::ios::binary|std::ios::trunc); f<<"initializing"; }
         if(previousRunUnclean) log("previous run did not clear the initializing marker; try SafeMode=1 if it crashed");
         if(!enabled.empty() && number(enabled,1)==0) {
             std::error_code markerError; fs::remove(marker,markerError);
             writeStatus(root,game,evidence,mods,"disabled","Loader.Enabled=0");
+            clearStartupDiagnostic(game);
             log("MODs disabled by Loader.Enabled=0; original game continues"); SetLastError(savedError); return;
         }
+        { std::ofstream f(marker,std::ios::binary|std::ios::trunc); f<<"initializing"; if(!f) log("ERROR could not create initializing marker"); }
         auto image=snapshotImage(GetCurrentProcess(),(U64)GetModuleHandleW(nullptr));
         auto sites=resolveSites(image);
         const bool loggerSignatures=sites.loggerHooks;
@@ -228,7 +290,7 @@ extern "C" void pbz_initialize() noexcept {
         auto generated=config(root,"./mods/",&mods);
         if(generated.size()>256*1024) throw std::runtime_error("Generated config exceeds 256 KiB");
         auto temporary=scripts/(L"generated-config."+std::to_wstring(GetCurrentProcessId())+L".tmp");
-        { std::ofstream f(temporary,std::ios::binary); f<<generated; f.close(); check(bool(f),"write config"); }
+        { std::ofstream f(temporary,std::ios::binary); f<<generated; f.close(); if(!f) throw std::runtime_error("write config failed"); }
         check(MoveFileExW(temporary.c_str(),(scripts/L"generated-config.js").c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH),"publish config");
         const auto base=(U64)GetModuleHandleW(nullptr);
         if(sites.validateBytes) {
@@ -237,6 +299,7 @@ extern "C" void pbz_initialize() noexcept {
         }
         auto installed=install(GetCurrentProcess(),base,image,sites,(U64)&validateModBytes,(U64)&validateModText);
         writeStatus(root,game,evidence,mods,"installed");
+        clearStartupDiagnostic(game);
         { std::error_code markerError; fs::remove(root/L"loader-initializing.marker",markerError); }
         if(!loggerSignatures) log("diagnostics=off (PuerTS logger signatures not found)");
         else if(!loggerHooksActive) log("diagnostics=off (LoggerHooks=0 or SafeMode=1)");
@@ -248,12 +311,18 @@ extern "C" void pbz_initialize() noexcept {
     } catch(const std::exception& e) {
         const std::string message=e.what();
         evidenceLog.pin("initialization failed");
+        if(!root.empty()) { std::error_code markerError; fs::remove(root/L"loader-initializing.marker",markerError); }
         try { writeStatus(root,game,evidence,mods,"failed",message); } catch(...) {}
+        if(root.empty() || evidence.empty()) writeStartupDiagnostic(game,message);
+        else clearStartupDiagnostic(game);
         log(std::string("MODs skipped: ")+message+"; original game continues");
     }
     catch(...) {
         evidenceLog.pin("unknown initialization failure");
+        if(!root.empty()) { std::error_code markerError; fs::remove(root/L"loader-initializing.marker",markerError); }
         try { writeStatus(root,game,evidence,mods,"failed","unknown initialization error"); } catch(...) {}
+        if(root.empty() || evidence.empty()) writeStartupDiagnostic(game,"unknown initialization error");
+        else clearStartupDiagnostic(game);
         log("MODs skipped: unknown initialization error; original game continues");
     }
     SetLastError(savedError);

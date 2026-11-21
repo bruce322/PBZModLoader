@@ -8,7 +8,7 @@ $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot
 if (!$GamePid) {
     $games=@(Get-CimInstance Win32_Process -Filter "Name='PBZ.exe'" |
-        Where-Object { $_.ExecutablePath -match '\\platform\\steam\\PBZ\.exe$' })
+        Where-Object { $_.ExecutablePath -match '\\platform\\(steam|wegame)\\PBZ\.exe$' })
     if ($games.Count -ne 1) { throw 'Expected one running Steam game process. Start the game in windowed 1280x720, or specify -GamePid.' }
     $GamePid=$games[0].ProcessId
 }

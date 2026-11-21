@@ -26,6 +26,12 @@ PBZModLoader 是《影之刃零》（Phantom Blade Zero）的 MOD 加载器，�
 
 本仓库包含加载器源码、运行文件模板、SDK 和开发工具。玩家请从上方发布页面获取安装包；本地构建的玩家运行包位于 `releases/`，游戏安装目录只需保留运行文件。
 
+## 1.0.7：热重载修复与诊断完善
+
+修复 `[Loader] HotReload=1` 无法生效的问题（配置值解析只接受 0，导致 Alt+F5 热重载始终被关闭）；`LogMode` 填写非法值时会在日志中提示并回退到 `full`；热重载失败 MOD 的阻塞状态改为按 MOD ID 大小写不敏感匹配；重载后的状态行立即重新计算就绪状态，不再短暂沿用旧结果。
+
+同时修复诊断与清理路径：被捕获的初始化失败也会删除 `loader-initializing.marker`，下次启动不再误报 `previous-run=unclean`；启动诊断文件在游戏 EXE 旁与 `%TEMP%` 两处都会清理；evidence 中删除失败的运行目录会标记 `degraded` 而不再被当作已删除；配置数值与镜像内存错误会给出明确原因。
+
 ## 1.0.6：日志保留、模式与缓冲
 
 evidence 目录始终以 `LogDirectoryLimitMiB` 为硬上限。`LogRetentionRuns`（默认 10，1-100）控制普通运行目录的软目标；失败/验证等带额外文件的运行目录会被标记为 pinned，`LogPinnedMax`（默认 3，0-10）限制 pinned 数量。清理在启动和段轮转时进行，优先删除最旧普通 run，再删最旧 pinned；当前 run 永不删除，正在被其他进程写入的 run 跳过。`LogMode=full|errors|off` 控制写入（off 仍执行清理，errors 只写警告/错误）；`LogSegmentMiB` 默认 8。空间仍不足时停止写入并把 `degraded=1` 写进 `loader-status.log`，不反复重试。写入使用 8 KiB 缓冲，重要行立即落盘。
@@ -105,7 +111,7 @@ DLL 复制到实际 EXE 旁；不要解压默认 `version.dll` 覆盖其他 MOD�
 
 `build.ps1 -Test` 验证五种代理的静态加载、入口恢复、代表性 API 转发、并发调用、导出数量，
 以及重复入口与晚加载保护；原有 version 多布局、ABI 和游戏特征测试继续保留。
-`package.ps1` 默认生成正式版 `1.0.0`，检查全部五种 DLL、两个平台的默认入口、ZIP 白名单及解压哈希。
+`package.ps1` 默认读取仓库根目录的 `VERSION` 作为发布版本（当前 `1.0.7`），也可用 `-Version` 覆盖；它检查全部五种 DLL、两个平台的默认入口、ZIP 白名单及解压哈希。`build.ps1` 同样从 `VERSION` 读取版本并生成 `build/loader-version.hpp`（`PBZ_LOADER_VERSION`），原生状态日志首行与发布包版本都取自该宏，发版只需改 `VERSION` 一处。
 
 ## 0.3.0-preview：平台无关引导
 
@@ -167,8 +173,10 @@ Steam 和 WeGame 首次安装均可直接解压到游戏根目录，合并同名
 ```powershell
 npm ci
 .\build.ps1 -Compiler C:\path\to\llvm-mingw\bin\clang++.exe -Test
-.\package.ps1 -Version 1.0.0
+.\package.ps1
 ```
+
+`package.ps1` 不传 `-Version` 时使用仓库根目录 `VERSION` 中的版本；正式发布只改 `VERSION` 一处，本地试验才用 `-Version` 覆盖。
 
 主工程和发布包均不预装 MOD；开发自己的 MOD 请使用上述独立模板。
 每次启动自动发现 `mods/<ID>/main.js`，按 ID 排序加载；只加载已构建的 JavaScript。新增 MOD 只需放入目录，无需修改配置。
@@ -219,6 +227,18 @@ package.ps1 拒绝覆盖已有版本，并检查 ZIP 根目录、白名单及解
 ### 玩家可读状态
 
 每次启动会在 `ProjectPBZ/Content/JavaScript/PBZModLoader/loader-status.log` 覆盖写入一份简表：加载器版本、游戏路径与大小、入口 DLL、MOD 总数/启用/禁用及列表、挂钩/诊断/安全模式状态、热重载开关和 evidence 日志路径；重载结果会追加到同一文件。该文件是只读摘要，详细原因仍看 `evidence/<本次运行>/loader.log`。
+
+### MOD 就绪信号与状态报告
+
+启动与每次热重载后，日志会出现一条 `[PBZMOD] status phase=... loaded=... failed=... disabled=... blocked=... unconfirmed=... unverified=... degraded=...` 摘要行，其中 `slowest=<ID>:<ms>ms` 指向本次加载最慢的 MOD。`blocked` 是重载时 `stop()` 清理失败、保留旧实例并跳过新版本的 MOD 数，同样使 `degraded=1` 并打印单行原因。计数与名单不变时该行不会重复输出（热重载后强制输出一次）；失败、blocked 以及“声明了就绪但未就绪”的 MOD 各打印一条单行原因与位置，不必再翻多行栈。
+
+MOD 有两种声明就绪的方式：加载成功后导出 `exports.ready = true`，或在 `main.js` 中调用 `globalThis.__PBZDeclareReady('<ID>')`。声明了就绪但值为假计入 `unconfirmed` 并使 `degraded=1`；完全不给信号的计入 `unverified`（仅提示，不影响加载）。
+
+在 MOD 代码或脚本控制台执行 `globalThis.__PBZModLoaderReport()` 会向日志输出一行 `[PBZMOD] report <JSON>` 并返回同一份 JSON：阶段、状态、计数、就绪统计、热重载次数，以及每个 MOD 的 `status`/`entry`/`loadMs`/`reloadMs`/`readyState`/`reason`/`frame`/`reloadError`。该快照可直接粘贴给作者排查。
+
+### 启动诊断
+
+如果初始化在找到 `ProjectPBZ` 运行时目录之前就失败（最常见的是把 `platform`/`ProjectPBZ` 解压多套了一层，或入口 DLL 放错位置），此时 `loader-status.log` 和 `evidence` 日志都还不存在。加载器会在游戏 EXE 同目录写入 `PBZModLoader-diagnostic.log`（该目录不可写时退回 `%TEMP%`），内容包括时间、PID、错误、游戏路径与大小、向上查找的每一层目录及 `content`/`mods-ini` 命中情况、修复提示和入口 DLL 路径。初始化成功或被捕获的初始化失败后，该文件与 marker 都会被自动清理。
 
 ### 日志轮转与磁盘配额
 

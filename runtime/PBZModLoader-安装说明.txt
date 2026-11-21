@@ -1,4 +1,4 @@
-PBZModLoader 1.0.6 安装说明
+PBZModLoader 1.0.7 安装说明
 
 1. 退出游戏，打开游戏安装目录（能看到 ProjectPBZ 文件夹的位置）。
 2. 先检查实际游戏 EXE 旁是否已有其他工具的 version.dll；如有，请按下方“备用入口”安装，勿覆盖。
@@ -69,12 +69,14 @@ stop 超过 5 秒未完成会保留旧实例并跳过该 MOD（日志 reload blo
 
 3 个 PuerTS 日志钩子只用于把诊断日志写进 loader.log，不是加载 MOD 必需；签名缺失时自动关闭，MOD 仍加载。
 LoggerHooks=1（默认）启用诊断钩子，0 关闭；SafeMode=1 本次运行关闭诊断钩子和热重载，用于排查启动崩溃。
-若 ProjectPBZ\Content\JavaScript\PBZModLoader\loader-initializing.marker 残留，状态日志会写 previous-run=unclean；成功初始化后会删除。
+若 ProjectPBZ\Content\JavaScript\PBZModLoader\loader-initializing.marker 残留，状态日志会写 previous-run=unclean；成功初始化或初始化失败被捕获时都会删除。
 
 日志和缓存
 
 日志：ProjectPBZ\Content\JavaScript\PBZModLoader\evidence\<本次运行>\loader.log（按 LogSegmentMiB 分段，默认 8 MiB；整个 evidence 目录以 LogDirectoryLimitMiB 为硬上限，默认 100 MiB、有效 16-512；LogRetentionRuns 默认 10，LogPinnedMax 默认 3；失败/验证 run 会被 pin 但有上限；空间不足时停止写入并在状态日志写 degraded=1）。
 状态摘要：ProjectPBZ\Content\JavaScript\PBZModLoader\loader-status.log（每次启动覆盖，列出入口、MOD 列表、挂钩/诊断/安全模式状态与热重载开关）。
+启动诊断：若初始化在找到 ProjectPBZ 运行时目录之前失败（常见原因是解压多套了一层目录或入口 DLL 放错位置），会在游戏 EXE 同目录写 PBZModLoader-diagnostic.log（该目录不可写时退回 %TEMP%），列出错误、游戏路径、向上查找的目录及修复提示；成功初始化或被捕获的初始化失败后自动删除。
+状态详情：日志中的 [PBZMOD] status ... 行在计数或名单变化时才输出，slowest= 指向最慢 MOD，blocked= 是重载清理失败而被阻塞的 MOD 数；失败/blocked MOD 会多打印一行原因与位置。MOD 可用 exports.ready = true 或 globalThis.__PBZDeclareReady('<ID>') 声明就绪；globalThis.__PBZModLoaderReport() 返回 JSON 快照并写入日志。
 可查找 failed、reload blocked、reload complete；快捷键无响应时也检查注册失败记录。
 ProjectPBZ\Content\JavaScript\PBZModLoader 下的 generated-reloads（热重载版本副本）为自动缓存，请勿编辑或在游戏运行中删除。
 启动时重建/清理，重载版本保留至下次启动。

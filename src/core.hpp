@@ -28,6 +28,7 @@ std::ofstream output;
 void log(const std::string& s) { std::cout<<s<<std::endl; if(output) { output<<s<<'\n'; output.flush(); } }
 #endif
 void check(bool ok,const char* op) { if(!ok) throw std::runtime_error(std::string(op)+" error="+std::to_string(GetLastError())); }
+constexpr DWORD readableProtections=PAGE_READONLY|PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY;
 struct Handle {
     HANDLE h=nullptr;
     explicit Handle(HANDLE v=nullptr):h(v){}
@@ -61,7 +62,10 @@ bool utf8Bom(const fs::path& p) {
 }
 int number(const std::wstring& s,int max) {
     if(s.empty() || s.find_first_not_of(L"0123456789")!=std::wstring::npos) throw std::runtime_error("Invalid numeric config");
-    auto n=std::stoul(s); if(n>(unsigned)max) throw std::runtime_error("Config number out of range"); return (int)n;
+    unsigned long n=0;
+    try { n=std::stoul(s); }
+    catch(const std::exception&) { throw std::runtime_error("Invalid numeric config"); }
+    if(n>(unsigned)max) throw std::runtime_error("Config number out of range"); return (int)n;
 }
 struct ModInfo { std::string id,entry; bool enabled; };
 bool isReparsePoint(const fs::path& p) {
@@ -119,8 +123,9 @@ void syncMods(const fs::path& root,const fs::path& scripts) {
             throw std::runtime_error("MOD source/cache must not contain reparse points");
     };
     rejectLink(source); rejectLink(cache);
-    if(fs::exists(source)) for(const auto& item:fs::recursive_directory_iterator(source)) rejectLink(item.path());
-    if(fs::exists(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) rejectLink(item.path());
+    if(fs::exists(source) && !fs::is_directory(source)) throw std::runtime_error("mods must be a directory");
+    if(fs::is_directory(source)) for(const auto& item:fs::recursive_directory_iterator(source)) rejectLink(item.path());
+    if(fs::is_directory(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) rejectLink(item.path());
     fs::remove_all(cache); fs::create_directories(cache);
     if(!fs::exists(source)) return;
     for(const auto& item:fs::recursive_directory_iterator(source)) {
@@ -143,7 +148,7 @@ void resetGenerated(const fs::path& scripts) {
             throw std::runtime_error("Generated cache must not contain reparse points");
     };
     reject(cache);
-    if(fs::exists(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) reject(item.path());
+    if(fs::is_directory(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) reject(item.path());
     fs::remove_all(cache);
 }
 
@@ -156,7 +161,7 @@ void resetReloads(const fs::path& scripts) {
             throw std::runtime_error("Hot reload cache contains reparse point");
     };
     reject(cache);
-    if(fs::exists(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) reject(item.path());
+    if(fs::is_directory(cache)) for(const auto& item:fs::recursive_directory_iterator(cache)) reject(item.path());
     fs::remove_all(cache); fs::create_directories(cache);
 }
 
@@ -169,7 +174,7 @@ void publishReload(const fs::path& root,const fs::path& scripts,unsigned revisio
     auto generated=config(root,"./generated-reloads/"+std::to_string(revision)+"/generated-mods/");
     auto enabled=ini(root/L"mods.ini",L"Loader",L"Enabled");
     if(!enabled.empty() && number(enabled,1)==0) generated="module.exports={version:1,mods:[]};\n";
-    { std::ofstream f(stage/L"config.js",std::ios::binary); f<<generated; f.close(); check(bool(f),"write reload config"); }
+    { std::ofstream f(stage/L"config.js",std::ios::binary); f<<generated; f.close(); if(!f) throw std::runtime_error("write reload config failed"); }
     fs::rename(stage,cache/std::to_wstring(revision));
 }
 
@@ -178,7 +183,7 @@ void publishReloadFailure(const fs::path& scripts,unsigned revision) {
     fs::create_directories(stage);
     { std::ofstream f(stage/L"config.js",std::ios::binary);
       f<<"module.exports={error:'Reload preparation failed; see loader.log'};\n";
-      f.close(); check(bool(f),"write reload failure"); }
+      f.close(); if(!f) throw std::runtime_error("write reload failure config failed"); }
     fs::rename(stage,cache/std::to_wstring(revision));
 }
 
@@ -188,7 +193,7 @@ void read(HANDLE,U64 address,void* dest,size_t n) {
     while(done<n) {
         MEMORY_BASIC_INFORMATION region{};
         check(VirtualQuery((void*)(address+done),&region,sizeof(region))!=0,"query image memory");
-        if(region.State!=MEM_COMMIT || (region.Protect&(PAGE_NOACCESS|PAGE_GUARD))) throw std::runtime_error("Unreadable image memory");
+        if(region.State!=MEM_COMMIT || (region.Protect&(PAGE_NOACCESS|PAGE_GUARD)) || !(region.Protect&readableProtections)) throw std::runtime_error("Unreadable image memory");
         size_t count=std::min(n-done,(size_t)((U64)region.BaseAddress+region.RegionSize-address-done));
         if(!count) throw std::runtime_error("Invalid image region");
         std::memcpy((unsigned char*)dest+done,(void*)(address+done),count); done+=count;
@@ -233,12 +238,11 @@ void rel32(Bytes& b,U64 from,U64 to) {
 void absoluteJump(Bytes& b,U64 target) { b.insert(b.end(),{0xff,0x25,0,0,0,0}); imm64(b,target); }
 #include "signatures.hpp"
 bool mappedReadable(U64 at,size_t size) {
-    constexpr DWORD readable=PAGE_READONLY|PAGE_READWRITE|PAGE_WRITECOPY|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY;
     U64 end=at+size; if(end<at) return false;
     while(at<end) {
         MEMORY_BASIC_INFORMATION info{};
         if(!VirtualQuery((LPCVOID)(UINT_PTR)at,&info,sizeof(info))) return false;
-        if(info.State!=MEM_COMMIT || (info.Protect&(PAGE_NOACCESS|PAGE_GUARD)) || !(info.Protect&readable)) return false;
+        if(info.State!=MEM_COMMIT || (info.Protect&(PAGE_NOACCESS|PAGE_GUARD)) || !(info.Protect&readableProtections)) return false;
         U64 next=(U64)(UINT_PTR)info.BaseAddress+info.RegionSize;
         if(next<=at) return false;
         at=next;

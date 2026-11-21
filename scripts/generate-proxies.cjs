@@ -4,11 +4,15 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const names = ['version', 'hid', 'winmm', 'dsound', 'dxgi'];
 const asm = fs.readFileSync(path.join(root, 'src/proxy.S'), 'utf8').split('    version_export 0')[0];
+if (!asm || asm === fs.readFileSync(path.join(root, 'src/proxy.S'), 'utf8'))
+  throw Error('src/proxy.S is missing the version_export placeholder');
 for (const name of names) {
   const def = fs.readFileSync(path.join(root, name === 'version' ? 'src/version.def' : `src/proxies/${name}.def`), 'utf8');
   const exports = [...def.matchAll(/^[ \t]+(\w+)=pbz_version_(\d+) @(\d+)( NONAME)?[ \t\r]*$/gm)]
     .map(m => ({name: m[1], index: +m[2], ordinal: +m[3], noname: !!m[4]}));
-  if (!exports.length || exports.some((e, i) => e.index !== i) || new Set(exports.map(e => e.ordinal)).size !== exports.length)
+  if (!exports.length || exports.some((e, i) => e.index !== i) ||
+      new Set(exports.map(e => e.ordinal)).size !== exports.length ||
+      new Set(exports.map(e => e.name)).size !== exports.length)
     throw Error(`Invalid export manifest: ${name}`);
   const dir = path.join(root, 'build/proxies', name);
   fs.mkdirSync(dir, {recursive: true});

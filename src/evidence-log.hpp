@@ -2,6 +2,7 @@
 #include "core.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cwchar>
 #include <cwctype>
 #include <fstream>
@@ -10,15 +11,32 @@
 #include <string>
 #include <vector>
 
+// Parses a whole decimal value. Overflow, trailing characters and empty input
+// are all reported as invalid so a malformed mods.ini falls back to defaults
+// instead of throwing out of initialization.
+inline bool evidenceNumber(const std::wstring& value,long long& out) {
+    if(value.empty()) return false;
+    wchar_t* end=nullptr;
+    errno=0;
+    long long parsed=0;
+    try {
+        parsed=std::wcstoll(value.c_str(),&end,10);
+    } catch(...) {
+        return false;
+    }
+    if(errno==ERANGE || end==value.c_str() || *end) return false;
+    out=parsed;
+    return true;
+}
+
 // Evidence directory budget, in MiB. Keep the default deliberately small:
 // a runaway MOD can otherwise fill the disk during a long session.
 inline U64 evidenceBudget(const std::wstring& value) {
     constexpr U64 defaultBudget=100ULL<<20;
     constexpr U64 minimumBudget=16ULL<<20;
     constexpr U64 maximumBudget=512ULL<<20;
-    wchar_t* end=nullptr;
-    const long long mib=std::wcstoll(value.c_str(),&end,10);
-    if(end==value.c_str() || *end) return defaultBudget;
+    long long mib=0;
+    if(!evidenceNumber(value,mib)) return defaultBudget;
     if(mib<16) return minimumBudget;
     if(mib>512) return maximumBudget;
     return static_cast<U64>(mib)<<20;
@@ -26,9 +44,8 @@ inline U64 evidenceBudget(const std::wstring& value) {
 
 inline unsigned evidenceRetentionRuns(const std::wstring& value) {
     if(value.empty()) return 10;
-    wchar_t* end=nullptr;
-    const long long runs=std::wcstoll(value.c_str(),&end,10);
-    if(end==value.c_str() || *end) return 10;
+    long long runs=0;
+    if(!evidenceNumber(value,runs)) return 10;
     if(runs<1) return 1;
     if(runs>100) return 100;
     return static_cast<unsigned>(runs);
@@ -36,9 +53,8 @@ inline unsigned evidenceRetentionRuns(const std::wstring& value) {
 
 inline unsigned evidencePinnedRuns(const std::wstring& value) {
     if(value.empty()) return 3;
-    wchar_t* end=nullptr;
-    const long long runs=std::wcstoll(value.c_str(),&end,10);
-    if(end==value.c_str() || *end) return 3;
+    long long runs=0;
+    if(!evidenceNumber(value,runs)) return 3;
     if(runs<0) return 0;
     if(runs>10) return 10;
     return static_cast<unsigned>(runs);
@@ -57,9 +73,8 @@ inline EvidenceLogMode evidenceLogMode(const std::wstring& value) {
 
 inline U64 evidenceSegmentSize(const std::wstring& value) {
     constexpr U64 defaultSize=8ULL<<20;
-    wchar_t* end=nullptr;
-    const long long mib=std::wcstoll(value.c_str(),&end,10);
-    if(end==value.c_str() || *end) return defaultSize;
+    long long mib=0;
+    if(!evidenceNumber(value,mib)) return defaultSize;
     if(mib<1) return 1ULL<<20;
     if(mib>64) return 64ULL<<20;
     return static_cast<U64>(mib)<<20;
@@ -105,6 +120,7 @@ class EvidenceLog {
         bool pinned=false;
         bool active=false;
         bool removed=false;
+        bool failed=false;
     };
 
     static bool isLogName(const std::wstring& name) {
@@ -209,11 +225,12 @@ class EvidenceLog {
             };
             auto dropOldest=[&](bool pinned) {
                 for(auto& info:runs) {
-                    if(info.removed || info.pinned!=pinned || info.path==run || info.active) continue;
+                    if(info.removed || info.failed || info.pinned!=pinned || info.path==run || info.active) continue;
                     std::error_code error;
                     fs::remove_all(info.path,error);
+                    if(error) { info.failed=true; degraded=true; continue; }
                     info.removed=true;
-                    return !error;
+                    return true;
                 }
                 return false;
             };
@@ -226,13 +243,13 @@ class EvidenceLog {
             while(total>directoryLimit) {
                 RunInfo* pick=nullptr;
                 for(auto& info:runs) {
-                    if(info.removed || info.pinned || info.path==run || info.active) continue;
+                    if(info.removed || info.failed || info.pinned || info.path==run || info.active) continue;
                     pick=&info;
                     break;
                 }
                 if(!pick) {
                     for(auto& info:runs) {
-                        if(info.removed || !info.pinned || info.path==run || info.active) continue;
+                        if(info.removed || info.failed || !info.pinned || info.path==run || info.active) continue;
                         pick=&info;
                         break;
                     }
@@ -244,8 +261,9 @@ class EvidenceLog {
                 const auto removedSize=pick->size;
                 std::error_code error;
                 fs::remove_all(pick->path,error);
+                if(error) { pick->failed=true; degraded=true; continue; }
                 pick->removed=true;
-                if(!error) total-=removedSize;
+                total-=removedSize;
             }
 
             lastTotal=total;

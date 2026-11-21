@@ -1,4 +1,4 @@
-﻿param([switch]$CheckOnly, [switch]$RestoreOnly, [switch]$Status, [switch]$MaximizeOnly)
+﻿param([switch]$CheckOnly, [switch]$RestoreOnly, [switch]$RestoreConfig, [switch]$Status, [switch]$MaximizeOnly, [string]$SteamExe = '', [string]$GameExe = '')
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
 using System;
@@ -66,12 +66,42 @@ public static class PBZWindow {
 }
 "@
 [void][PBZWindow]::SetThreadDpiAwarenessContext([IntPtr]::new(-4))
-$steamExe = 'D:\Program Files\Steam\steam.exe'
-$gameExe = 'D:\Program Files\Steam\steamapps\common\PBZ\platform\steam\PBZ.exe'
-if (!(Test-Path -LiteralPath $steamExe) -or !(Test-Path -LiteralPath $gameExe)) {
-    throw 'Steam or PBZ executable was not found.'
+function Find-Steam {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    try { $steamPath = (Get-ItemProperty -LiteralPath 'HKCU:\Software\Valve\Steam' -ErrorAction Stop).SteamPath } catch { $steamPath = '' }
+    if ($steamPath) { $candidates.Add((Join-Path $steamPath 'steam.exe')) }
+    foreach ($root in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) { if ($root) { $candidates.Add((Join-Path $root 'Steam\steam.exe')) } }
+    return $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
+function Find-Game([string]$steam) {
+    if (!$steam) { return $null }
+    $vdf = Join-Path (Split-Path -Parent $steam) 'steamapps\libraryfolders.vdf'
+    $libraries = New-Object System.Collections.Generic.List[string]
+    if (Test-Path -LiteralPath $vdf) {
+        foreach ($match in [regex]::Matches((Get-Content -LiteralPath $vdf -Raw), '"path"\s+"([^"]+)"')) { $libraries.Add($match.Groups[1].Value.Replace('\\', '\')) }
+    }
+    foreach ($library in $libraries) {
+        $candidate = Join-Path $library 'steamapps\common\PBZ\platform\steam\PBZ.exe'
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+    return $null
+}
+if (!$SteamExe) { $SteamExe = Find-Steam }
+if (!$GameExe -and $SteamExe) { $GameExe = Find-Game $SteamExe }
+if (!$SteamExe -or !$GameExe -or !(Test-Path -LiteralPath $SteamExe) -or !(Test-Path -LiteralPath $GameExe)) {
+    throw 'Steam or PBZ executable was not found. Pass -SteamExe and -GameExe explicitly.'
+}
+$steamExe = $SteamExe
+$gameExe = $GameExe
 if ($CheckOnly) { Write-Output 'Script syntax, native helper and executable paths OK.'; exit 0 }
+if ($RestoreConfig) {
+    $restoreConfig = Join-Path $env:LOCALAPPDATA 'ProjectPBZ\Saved\Config\Windows\GameUserSettings.ini'
+    $restoreBackup = $restoreConfig + '.windowed-launcher.bak'
+    if (!(Test-Path -LiteralPath $restoreBackup)) { throw 'No windowed-launcher backup was found.' }
+    Copy-Item -LiteralPath $restoreBackup -Destination $restoreConfig -Force
+    Write-Output 'Restored GameUserSettings.ini from the windowed-launcher backup.'
+    exit 0
+}
 if ($Status) {
     $active = @(Get-Process PBZ -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -eq $gameExe -and $_.MainWindowHandle -ne 0 })
@@ -125,8 +155,9 @@ try {
         LastUserConfirmedDesiredScreenWidth=1280; LastUserConfirmedDesiredScreenHeight=720
     }
     $lines = [Collections.Generic.List[string]]::new()
+    $backup = $config + '.windowed-launcher.bak'
     if (Test-Path -LiteralPath $config) {
-        Copy-Item -LiteralPath $config -Destination ($config + '.windowed-launcher.bak') -Force
+        if (!(Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $config -Destination $backup }
         $lines.AddRange([string[]][IO.File]::ReadAllLines($config))
     } else {
         [void][IO.Directory]::CreateDirectory((Split-Path $config))

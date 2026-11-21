@@ -65,6 +65,11 @@ int main() {
     assert(evidenceLogMode(L"nope")==EvidenceLogMode::Full);
     assert(evidenceSegmentSize(L"1")==(1ULL<<20));
     assert(evidenceSegmentSize(L"999")==(64ULL<<20));
+    assert(evidenceBudget(L"999999999999999999999")==(100ULL<<20));
+    assert(evidenceRetentionRuns(L"999999999999999999999")==10);
+    assert(evidencePinnedRuns(L"999999999999999999999")==3);
+    assert(evidenceSegmentSize(L"999999999999999999999")==(8ULL<<20));
+    assert(evidenceBudget(L"-999999999999999999999")==(100ULL<<20));
     std::cout<<"PASS evidence options: retention/pinned/mode/segment parsing\n";
 
     {
@@ -135,6 +140,40 @@ int main() {
         assert(!fs::exists(run/L"loader.log"));
         assert(log.status().find("mode=off")!=std::string::npos);
         std::cout<<"PASS evidence off mode: no loader.log, status remains visible\n";
+    }
+
+    {
+        const auto root=temp/L"evidence-locked";
+        const auto stuck=root/L"20260107-000000-1-dll";
+        fs::create_directories(stuck);
+        { std::ofstream f(stuck/L"loader.log",std::ios::binary); f<<"stuck\r\n"; }
+        { std::ofstream f(stuck/L"artifact.bin",std::ios::binary); f<<"payload"; }
+        { std::ofstream f(stuck/L"pinned",std::ios::binary); f<<"x"; }
+        HANDLE locked=CreateFileW((stuck/L"artifact.bin").c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                  nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+        assert(locked!=INVALID_HANDLE_VALUE);
+        const auto current=root/L"20260108-000000-2-dll";
+        EvidenceLog log;
+        log.initialize(current,L"1",L"10",L"full",L"0");
+        log.append("current\r\n");
+        log.shutdown();
+        CloseHandle(locked);
+        const auto status=log.status();
+        assert(fs::exists(stuck/L"artifact.bin"));
+        assert(status.find("degraded=1")!=std::string::npos);
+        assert(status.find("pinned=1")!=std::string::npos);
+        std::cout<<"PASS evidence pinned: failed deletion reports degraded and keeps the stuck run\n";
+    }
+
+    {
+        const auto run=temp/L"evidence-overflow"/L"20260109-000000-1-dll";
+        EvidenceLog log;
+        log.initialize(run,L"999999999999999999999",L"999999999999999999999",L"full",
+                       L"999999999999999999999",L"999999999999999999999");
+        log.append("overflow\r\n");
+        log.shutdown();
+        assert(fs::exists(run/L"loader.log"));
+        std::cout<<"PASS evidence overflow: huge numeric options fall back instead of failing initialization\n";
     }
 
     fs::remove_all(temp);

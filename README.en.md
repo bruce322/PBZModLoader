@@ -26,6 +26,12 @@ Install Node.js and npm on your development machine, then run `npm ci`, `npm run
 
 This repository contains loader source code, runtime file templates, the SDK, and development tools. Players should download an installation package from the release page above. Locally built player packages are placed in `releases/`; only runtime files belong in the game installation directory.
 
+## 1.0.7: hot reload fix and diagnostics
+
+Fixed `[Loader] HotReload=1` never taking effect (the value parser accepted only 0, so Alt+F5 hot reload stayed disabled). An invalid `LogMode` now logs a warning and falls back to `full`. Failed MODs blocked during reload are matched case-insensitively by MOD ID. Reload status lines recompute readiness immediately instead of briefly reusing stale results.
+
+Diagnostic and cleanup paths were fixed as well: handled initialization failures now clear `loader-initializing.marker` so the next launch is not reported as `previous-run=unclean`; the startup diagnostic is removed from both the game directory and `%TEMP%`; evidence runs whose deletion fails are marked degraded instead of being silently counted as removed; numeric config and image-memory failures report a clear message.
+
 ## 1.0.6: log retention, modes, and buffering
 
 `LogDirectoryLimitMiB` is a hard cap for the evidence directory. `LogRetentionRuns` (default 10, 1-100) is a soft target for ordinary run directories. Runs with extra files (failures/verification) are pinned, and `LogPinnedMax` (default 3, 0-10) bounds pinned runs. Cleanup runs at startup and segment rotation: oldest ordinary runs are removed first, then oldest pinned runs; the current run is never removed and runs actively written by another process are skipped. `LogMode=full|errors|off` controls writes (off still enforces the budget; errors writes only warnings/errors), and `LogSegmentMiB` defaults to 8. If space is still insufficient, writes stop and `degraded=1` appears in `loader-status.log` instead of retrying forever. Writes use an 8 KiB buffer; important lines are flushed immediately.
@@ -94,7 +100,7 @@ The four alternative entry points passed startup validation on the Steam build t
 
 Builds use fixed export lists in `src/version.def` and `src/proxies/*.def`. `scripts/generate-proxies.cjs` generates five sets of configurations and forwarding stubs without reading the build machine's System32 directory. Named exports are forwarded by name where possible; NONAME exports use ordinals. System functions are resolved on demand, so missing optional interfaces that are never used do not prevent startup. Calling an unavailable interface on an unknown system fails fast. These lists come from the exports observed on the locally tested system and do not guarantee undocumented ordinal ABIs across all historical Windows versions. Only proxies loaded statically during startup install the executable entry hook; proxies loaded through LoadLibrary at runtime only forward functions.
 
-`build.ps1 -Test` checks static loading, entry point restoration, representative API forwarding, concurrent calls, and export counts for all five proxies, plus duplicate-entry and late-loading safeguards. Existing version proxy tests for multiple layouts, ABI behavior, and game signatures remain in place. `package.ps1` defaults to stable version `1.0.0` and checks all five DLLs, both platforms' default entry points, the ZIP allowlist, and extracted file hashes.
+`build.ps1 -Test` checks static loading, entry point restoration, representative API forwarding, concurrent calls, and export counts for all five proxies, plus duplicate-entry and late-loading safeguards. Existing version proxy tests for multiple layouts, ABI behavior, and game signatures remain in place. `package.ps1` defaults to the version in the repository's `VERSION` file (currently `1.0.7`); pass `-Version` to override. It checks all five DLLs, both platforms' default entry points, the ZIP allowlist, and extracted file hashes. `build.ps1` reads the same file and generates `build/loader-version.hpp` (`PBZ_LOADER_VERSION`), which supplies the first line of the native status log and the package version, so a release only needs `VERSION` updated.
 
 ## 0.3.0-preview: Platform-independent bootstrap
 
@@ -141,8 +147,10 @@ Developers can use the [read-only reflection export tool](scripts/REFLECTION.md)
 ```powershell
 npm ci
 .\build.ps1 -Compiler C:\path\to\llvm-mingw\bin\clang++.exe -Test
-.\package.ps1 -Version 1.0.0
+.\package.ps1
 ```
+
+Without `-Version`, `package.ps1` uses the `VERSION` file in the repository root; update only `VERSION` for a release and reserve `-Version` for local experiments.
 
 Neither the main project nor release packages include preinstalled mods. Use the standalone template above to develop your own.
 
@@ -186,6 +194,18 @@ For startup-crash troubleshooting, try `SafeMode=1` first. If `ProjectPBZ/Conten
 ### Player-readable status
 
 Each startup overwrites `ProjectPBZ/Content/JavaScript/PBZModLoader/loader-status.log` with a short summary: loader version, game path and size, entry DLL, total/enabled/disabled mods and their list, hook/diagnostic/safe-mode state, hot-reload switch, and the evidence log path. Reload results are appended to the same file. This file is a read-only summary; detailed reasons remain in `evidence/<run>/loader.log`.
+
+### MOD readiness signals and status report
+
+After startup and after each hot reload the log contains a `[PBZMOD] status phase=... loaded=... failed=... disabled=... blocked=... unconfirmed=... unverified=... degraded=...` summary line; the optional `slowest=<ID>:<ms>ms` names the slowest MOD of that load. `blocked` counts MODs whose `stop()` cleanup failed during a reload, so the old instance stays and the new version is skipped; they also set `degraded=1` and get a single-line reason. The line is not repeated while counts and MOD lists stay unchanged (a reload always prints once), and failed, blocked, or declared-but-not-ready MODs each get a single-line reason and location instead of a multi-line stack only.
+
+A MOD can announce readiness in two ways: export `exports.ready = true` once loaded, or call `globalThis.__PBZDeclareReady('<ID>')` from its `main.js`. A declared-but-false signal counts as `unconfirmed` and sets `degraded=1`; no signal at all counts as `unverified` (informational only, loading is unaffected).
+
+Calling `globalThis.__PBZModLoaderReport()` from MOD code or the script console logs one `[PBZMOD] report <JSON>` line and returns the same JSON: phase, status, counts, readiness, reload count, and each MOD's `status`/`entry`/`loadMs`/`reloadMs`/`readyState`/`reason`/`frame`/`reloadError`. The snapshot can be pasted into a bug report as-is.
+
+### Startup diagnostic
+
+If initialization fails before the `ProjectPBZ` runtime directory is found (most often because `platform`/`ProjectPBZ` was extracted one folder too deep, or the entry DLL is in the wrong place), neither `loader-status.log` nor the `evidence` log exists yet. The loader then writes `PBZModLoader-diagnostic.log` beside the game executable (falling back to `%TEMP%` when that directory is not writable) with the time, PID, error, game path and size, every directory searched upward with its `content`/`mods-ini` hits, a repair hint, and the entry DLL path. The file and the marker are removed automatically after a successful initialization or a handled initialization failure.
 
 ### Log rotation and disk budget
 

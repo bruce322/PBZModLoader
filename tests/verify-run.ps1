@@ -17,6 +17,7 @@ if ($RequireExit) {
     if ($dll) {
         $observed = Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $Log).Path) 'exit-observer.json'
         $entry = @($lines -match '^entry-restored; pid=')[0]
+        if (!$entry) { throw 'Missing entry-restored; pid= line in the loader log.' }
         $gameId = [int]($entry -replace '^entry-restored; pid=','')
         $observer = if (Test-Path -LiteralPath $observed) { Get-Content -Raw -LiteralPath $observed | ConvertFrom-Json } else { $null }
         $checks['normalExit'] = $null -ne $observer -and $null -ne $observer.exitCode -and $observer.exitCode -eq 0 -and $observer.gamePid -eq $gameId

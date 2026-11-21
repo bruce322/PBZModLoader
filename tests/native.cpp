@@ -13,6 +13,44 @@ void capture(void* context,const FString* name,void* argv) {
 int main() {
     HANDLE process=GetCurrentProcess();
     {
+        assert(number(L"0",1)==0 && number(L"1",1)==1);
+        const wchar_t* invalid[]={L"",L"-1",L"2",L"abc",L"999999999999999999999"};
+        for(const auto value:invalid) {
+            bool rejected=false;
+            try { number(value,1); } catch(const std::runtime_error&) { rejected=true; }
+            assert(rejected);
+        }
+        std::cout<<"PASS numeric config parsing rejects malformed and out-of-range values\n";
+    }
+    {
+        const auto testRoot=fs::temp_directory_path()/("pbz-config-test-"+std::to_string(GetCurrentProcessId()));
+        std::error_code ignored; fs::remove_all(testRoot,ignored);
+        fs::create_directories(testRoot/L"mods/A"); fs::create_directories(testRoot/L"mods/B");
+        {
+            std::ofstream f(testRoot/L"mods.ini",std::ios::binary);
+            f<<"[Loader]\r\nVersion=1\r\n[Mods]\r\nA=0\r\n";
+        }
+        { std::ofstream f(testRoot/L"mods/A/main.js",std::ios::binary); f<<"// A"; }
+        { std::ofstream f(testRoot/L"mods/B/main.js",std::ios::binary); f<<"// B"; }
+        std::vector<ModInfo> found;
+        const auto text=config(testRoot,"./mods/",&found);
+        assert(found.size()==2);
+        assert(text.find(R"("id":"A")")!=std::string::npos && text.find(R"("id":"B")")!=std::string::npos);
+        assert(text.find(R"("enabled":false)")!=std::string::npos);
+        { std::ofstream f(testRoot/L"mods.ini",std::ios::binary); f<<"[Loader]\r\n"; }
+        bool rejected=false;
+        try { config(testRoot,"./mods/"); } catch(const std::runtime_error&) { rejected=true; }
+        assert(rejected);
+        { std::ofstream f(testRoot/L"mods.ini",std::ios::binary); f<<"[Loader]\r\nVersion=1\r\n[Mods]\r\nA=2\r\n"; }
+        rejected=false;
+        try { config(testRoot,"./mods/"); } catch(const std::runtime_error& e) {
+            rejected=std::string(e.what()).find("Config number out of range")!=std::string::npos;
+        }
+        assert(rejected);
+        fs::remove_all(testRoot,ignored);
+        std::cout<<"PASS runtime config discovery and validation\n";
+    }
+    {
         auto image=snapshotImage(process,(U64)(UINT_PTR)GetModuleHandleW(nullptr));
         assert(image.bytes.empty());
         assert(!image.sections.empty());
@@ -41,6 +79,13 @@ int main() {
         assert(!mappedReadable((U64)(UINT_PTR)guard,1));
         VirtualFree(guard,0,MEM_RELEASE);
         std::cout<<"PASS mapped image view: inaccessible pages rejected\n";
+    }
+    {
+        auto executeOnly=VirtualAlloc(nullptr,4096,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(executeOnly);
+        DWORD old=0; assert(VirtualProtect(executeOnly,4096,PAGE_EXECUTE,&old));
+        assert(!mappedReadable((U64)(UINT_PTR)executeOnly,1));
+        VirtualFree(executeOnly,0,MEM_RELEASE);
+        std::cout<<"PASS mapped image view: execute-only pages rejected\n";
     }
     {
         auto fake=(unsigned char*)VirtualAlloc(nullptr,0x10000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE); assert(fake);
